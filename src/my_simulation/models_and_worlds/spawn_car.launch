@@ -1,0 +1,19 @@
+<launch>
+  <!-- 1. 加载 URDF 机器人模型 -->
+  <param name="robot_description" command="cat /home/lmy/catkin_ws/src/my_simulation/models_and_worlds/simple_car.urdf"/>
+
+  <!-- 2. 启动 Gazebo 并加载 World -->
+  <include file="/opt/ros/noetic/share/gazebo_ros/launch/empty_world.launch">
+    <arg name="world_name" value="/home/lmy/catkin_ws/src/my_simulation/models_and_worlds/tennis_court.world"/>
+    <arg name="paused" value="false"/>
+    <arg name="use_sim_time" value="true"/>
+    <arg name="gui" value="true"/>
+  </include>
+
+  <!-- 3. 在 Gazebo 中生成机器人 -->
+  <node name="spawn_urdf" pkg="gazebo_ros" type="spawn_model" output="screen"
+        args="-param robot_description -urdf -model simple_car -x 0 -y 0 -z 0.05"/>
+
+  <!-- 4. 可选：加载差速驱动插件（如果 URDF 已经有 gazebo plugin） -->
+  <!-- 如果 URDF 内 gazebo plugin 配置正确，这里可以不用额外节点 -->
+</launch>
