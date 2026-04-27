@@ -1,76 +1,228 @@
+# 🎾 视觉定位模块: 网球识别定位及捡球路径规划
 
-# 🎾 视觉定位模块: 网球识别定位及捡球路径规划 (Tennis Vision & Localization)
+本模块是《基于计算机视觉的网球识别定位及捡球路径规划》的核心感知子系统。当前实现为纯 C++ 离线验证程序，基于 OpenCV DNN 运行 YOLO ONNX 模型，完成双目图像中的网球检测、左右目标匹配、融合深度估计、误差补偿和结果可视化。
 
-本模块为《基于计算机视觉的网球识别定位及捡球路径规划》的核心感知子系统。系统采用纯 C++ 编写，基于 OpenCV DNN 部署 YOLO 轻量级目标检测模型，并自主实现了针对网球特征的多源深度融合与系统误差补偿算法，确保机械臂在执行捡球路径规划时获得高精度的三维物理坐标。
+## 功能概述
 
-## 🌟 核心算法与特性
+当前程序支持以下完整离线流程：
 
-### 1. 深度数据融合策略 (Multi-source Depth Fusion)
-针对单一双目视差测距在不同距离下精度波动的缺陷，系统引入了基于网球已知物理尺寸（直径 $67.0\text{ mm}$）的单目几何测距。系统根据目标距离动态调整置信权重：
-* **近场高置信度 (Z < 1m)**: $Z_{fusion} = 0.5 \times Z_{raw\_depth} + 0.5 \times Z_{geom}$
-* **远场几何主导 (Z $\ge$ 1m)**: $Z_{fusion} = 0.3 \times Z_{raw\_depth} + 0.7 \times Z_{geom}$
+- 读取双目标定参数 `stereo_config.yaml`
+- 加载 YOLO ONNX 模型 `best.onnx`
+- 批量读取 `data_multi_test/left_*.jpg` 与 `right_*.jpg`
+- 对左右图像执行立体校正
+- 使用 OpenCV DNN 进行网球检测
+- 使用匈牙利算法完成左右目标全局最优匹配
+- 融合双目视差深度与基于网球物理尺寸的单目几何深度
+- 使用经验补偿模型输出最终 `Z/X` 坐标
+- 生成带检测框、匹配连线和坐标标签的结果图
 
-### 2. 多维误差补偿模型 (Error Compensation)
-为消除相机镜头畸变残差及双目装配公差带来的系统误差，确保下位机控制精度，算法内嵌了校准补偿模型：
-* **Z轴 (深度) 二次拟合补偿**: 
-    $$Z_{true} = 0.0023 Z_{fusion}^2 + 1.0168 Z_{fusion} + 1.4368$$
-* **X轴 (横向) 解耦多元线性回归**: 
-    $$X_{true} = 1.4851 X_{est} - 0.0436 Z_{fusion} + 6.6313$$
-*(注：输出坐标已限制机械臂运动学安全下限 $Z \ge 15.0\text{ cm}$，并进行小数点后一位截断处理)*
+## 核心算法
 
-### 3. 稳健的立体匹配约束
-抛弃算力消耗巨大的全局立体匹配算法，采用针对 YOLO 目标框的贪心匹配策略。结合极线几何约束（Y 轴像素差 $\le 50.0$）与视差方向约束（$X_{diff} > 0$），构建包含坐标与像素面积比的综合代价函数，实现极低延迟的目标配对。
+### 1. 深度融合策略
 
-## 📂 文件结构与配置说明
+针对单一双目视差在不同距离下精度波动的问题，程序引入了网球已知直径 `67.0 mm` 的单目几何测距：
 
+- 近场 `Z < 1m`：`Z_fusion = 0.5 * Z_raw_depth + 0.5 * Z_geom`
+- 远场 `Z >= 1m`：`Z_fusion = 0.3 * Z_raw_depth + 0.7 * Z_geom`
 
-my_simulation/
-├── config/
-│   └── stereo_config.yaml         # 双目标定参数库
-├── src/
-│   └── stereo_vision_localization.cpp # 视觉融合测距核心算法源码
-├── weights/
-│   └── best.onnx                  # 训练完成的 YOLO ONNX 权重
-└── data_multi_test/               # 离线验证数据集 (左右视图)
-### 详细结构见文件 filetree.txt
+### 2. 误差补偿模型
 
-### ⚙️ 硬件参数配置 (`stereo_config.yaml`)
-当前模块加载的标准相机参数如下（由张正友标定法获取）：
-* **焦距 (Focal Length)**: 约 $523.8\text{ px}$
-* **基线长度 (Baseline)**: $58.63\text{ mm}$ (由平移向量 $T_x$ 绝对值提取)
-* **畸变模型 (Distortion)**: 5 参数径向与切向畸变模型 ($k_1, k_2, p_1, p_2, k_3$)
+为减小系统误差，程序对融合深度和横向偏移进行经验补偿：
 
-## 🚀 离线基准测试运行
+- `Z_true = 0.0023 * Z_fusion^2 + 1.0168 * Z_fusion + 1.4368`
+- `X_true = 1.4851 * X_est - 0.0436 * Z_fusion + 6.6313`
 
-当前代码版本为纯 C++ 算法验证脚本，无需启动 ROS 节点即可独立验证测距算法的准确性。
+输出坐标满足：
 
-**编译环境要求:**
-* C++14 及以上标准
-* OpenCV 3.4+ (需包含 `dnn` 与 `calib3d` 模块)
+- `Z >= 15.0 cm`
+- `Z/X` 保留 1 位小数
 
-**执行流程:**
-1. 确保 `stereo_config.yaml` 和 `best.onnx` 位于可执行文件同级或正确指定路径。
-2. 将测试图像命名为 `left_img.jpg` 与 `right_img.jpg` 放入工作目录。
-3. 编译并运行可执行文件，终端将输出目标的原始深度、补偿后 Z 坐标及 X 坐标。
+### 3. 左右目标匹配
+
+程序先对左右检测框按横向坐标排序，再基于以下约束构建代价矩阵：
+
+- 类别一致
+- 极线约束：`|cy_left - cy_right| <= 50`
+- 视差方向约束：`cx_left - cx_right > 0`
+- 面积一致性约束
+
+随后使用匈牙利算法求解全局最优匹配，而不是简单贪心匹配。
+
+## 项目结构
+
+```text
+catkin_ws/
+├── README.md
+├── data_multi_test/
+│   ├── left_0.jpg
+│   ├── ...
+│   └── right_3.jpg
+└── src/
+    └── my_simulation/
+        ├── config/
+        │   └── stereo_config.yaml
+        ├── src/
+        │   └── stereo_vision_localization.cpp
+        └── weights/
+            └── best.onnx
 ```
 
-***
+## 标定参数说明
 
-### 💡 针对后续 ROS 集成的代码修改建议
+当前程序从 `src/my_simulation/config/stereo_config.yaml` 读取以下字段：
 
-当你准备将这段纯 C++ 算法接入单 USB 双目相机并转化为真正的 ROS 节点时，你需要在 `main()` 函数中替换掉 `cv::imread` 逻辑。你可以参考以下代码片段来分割单 USB 传输的宽幅画面：
+- `M1`, `d1`: 左相机内参与畸变参数
+- `M2`, `d2`: 右相机内参与畸变参数
+- `R`, `T`: 双目外参
+
+当前标定参数对应的主要物理量：
+
+- 焦距约 `523.8 px`
+- 基线长度约 `58.64 mm`
+
+## 依赖要求
+
+### 最低要求
+
+- C++14
+- OpenCV，需包含以下模块：
+  - `core`
+  - `imgproc`
+  - `imgcodecs`
+  - `highgui`
+  - `calib3d`
+  - `dnn`
+
+### 版本建议
+
+程序中使用的 `best.onnx` 在系统自带 OpenCV `4.2.0` 下无法正常加载，实际验证通过的版本为本地安装的 OpenCV `4.10.0`。
+
+如果你在 OpenCV `4.2.0` 下运行，通常会出现类似错误：
+
+```text
+OpenCV(...)/onnx_importer.cpp:109: error: (-215:Assertion failed) ... in function 'getMatFromTensor'
+```
+
+因此建议：
+
+- 不要用系统自带的 OpenCV `4.2.0` 直接运行该模型
+- 使用独立安装的 OpenCV `4.10.x` 重新编译测试程序
+
+## 编译方式
+
+由于当前 ROS 工作区仍保留系统 OpenCV 依赖，离线测试建议先单独使用 `g++` 编译，而不是直接走 `catkin_make`。
+
+假设新版 OpenCV 安装在 `/usr/local/opencv-4.10`：
+
+```bash
+cd /home/lmy/catkin_ws
+
+g++ -std=c++14 src/my_simulation/src/stereo_vision_localization.cpp \
+  -o /tmp/stereo_test \
+  -I/usr/local/opencv-4.10/include/opencv4 \
+  -L/usr/local/opencv-4.10/lib \
+  -Wl,-rpath,/usr/local/opencv-4.10/lib \
+  -lopencv_core \
+  -lopencv_imgproc \
+  -lopencv_imgcodecs \
+  -lopencv_highgui \
+  -lopencv_calib3d \
+  -lopencv_dnn
+```
+
+## 运行方式
+
+程序支持命令行参数，格式如下：
+
+```bash
+/tmp/stereo_test <config_path> <model_path> <data_dir> <result_dir>
+```
+
+例如：
+
+```bash
+/tmp/stereo_test \
+  ./src/my_simulation/config/stereo_config.yaml \
+  ./src/my_simulation/weights/best.onnx \
+  ./data_multi_test \
+  /tmp/result_multi_ball_final
+```
+
+如果不传参数，程序会使用源码中定义的默认路径。
+
+## 输出结果
+
+### 终端输出
+
+程序会按图片逐行输出：
+
+- 图片名
+- 检测类别
+- 原始视差深度 `Raw Z`
+- 补偿后的最终深度 `Z`
+- 补偿后的横向偏移 `X`
+
+示例：
+
+```text
+| left_0.jpg | tennis_ball | 37.9 | 43.9 | 偏左 25.8 |
+```
+
+### 图像输出
+
+结果图会保存到你指定的 `result_dir`，每张图包含：
+
+- 左图绿色检测框
+- 右图蓝色检测框
+- 左右匹配目标之间的黄色连线
+- 左图上的 `Z/X` 坐标标签
+- 未成功匹配目标的红框和 `Unmatched` 标签
+
+## 当前实现说明
+
+当前版本是离线批处理程序，不是完整 ROS 话题节点。
+
+当前入口函数做的是：
+
+- 从磁盘读取测试图像
+- 批量处理整个测试集
+- 将结果保存到指定目录
+
+还没有做的部分包括：
+
+- 订阅 ROS 图像话题
+- 实时接收单 USB 双目拼接画面
+- 发布检测结果或三维坐标消息
+
+## 后续 ROS 集成建议
+
+如果后续要集成到 ROS，建议按下面的方向改造：
+
+- 用 `cv_bridge` 替换当前 `cv::imread` 批处理入口
+- 如果输入是单 USB 双目拼接图像，先按中线切分左右图
+- 将离线批量处理改成单帧回调处理
+- 视需要发布目标坐标、调试图像和检测框信息
+
+示例切分逻辑：
 
 ```cpp
-// 假设你通过 cv_bridge 拿到了单 USB 传回的原始宽幅图像 raw_img
-// 例如 raw_img 的尺寸是 1280 x 480
-cv::Mat raw_img; 
-
-// 计算中线
+cv::Mat raw_img;
 int half_width = raw_img.cols / 2;
-
-// 使用 cv::Rect 裁剪左右画面 (无需深拷贝，速度极快)
 cv::Mat img_l = raw_img(cv::Rect(0, 0, half_width, raw_img.rows));
 cv::Mat img_r = raw_img(cv::Rect(half_width, 0, half_width, raw_img.rows));
-
-// 接下来就可以将 img_l 和 img_r 传入你写好的 cv::remap 和检测循环中了
 ```
+
+## 当前已验证状态
+
+截至当前版本，离线流程已经验证通过：
+
+- 标定文件可以正常加载
+- ONNX 模型可在 OpenCV `4.10.0` 下正常加载
+- `data_multi_test` 中 4 组左右图可完整跑通
+- 程序可输出检测结果、融合坐标和可视化图像
+
+需要继续验证的部分：
+
+- 不同距离下的真实测距误差
+- 左右匹配是否在复杂遮挡场景下稳定
+- 补偿模型在新数据集上的泛化效果
