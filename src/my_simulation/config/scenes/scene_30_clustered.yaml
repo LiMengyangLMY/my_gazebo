@@ -1,0 +1,68 @@
+scene_name: clustered_30
+ball_names:
+  - tennis_ball_1
+  - tennis_ball_2
+  - tennis_ball_3
+  - tennis_ball_4
+  - tennis_ball_5
+  - tennis_ball_6
+  - tennis_ball_7
+  - tennis_ball_8
+  - tennis_ball_9
+  - tennis_ball_10
+  - tennis_ball_11
+  - tennis_ball_12
+  - tennis_ball_13
+  - tennis_ball_14
+  - tennis_ball_15
+  - tennis_ball_16
+  - tennis_ball_17
+  - tennis_ball_18
+  - tennis_ball_19
+  - tennis_ball_20
+  - tennis_ball_21
+  - tennis_ball_22
+  - tennis_ball_23
+  - tennis_ball_24
+  - tennis_ball_25
+  - tennis_ball_26
+  - tennis_ball_27
+  - tennis_ball_28
+  - tennis_ball_29
+  - tennis_ball_30
+balls:
+  - {name: tennis_ball_1, x: 1.35, y: 1.15, z: 0.033}
+  - {name: tennis_ball_2, x: 1.47, y: 1.04, z: 0.033}
+  - {name: tennis_ball_3, x: 1.56, y: 1.20, z: 0.033}
+  - {name: tennis_ball_4, x: 1.43, y: 1.31, z: 0.033}
+  - {name: tennis_ball_5, x: 1.60, y: 1.08, z: 0.033}
+
+  - {name: tennis_ball_6, x: 2.25, y: -1.25, z: 0.033}
+  - {name: tennis_ball_7, x: 2.38, y: -1.12, z: 0.033}
+  - {name: tennis_ball_8, x: 2.49, y: -1.29, z: 0.033}
+  - {name: tennis_ball_9, x: 2.33, y: -1.42, z: 0.033}
+  - {name: tennis_ball_10, x: 2.52, y: -1.16, z: 0.033}
+
+  - {name: tennis_ball_11, x: 3.35, y: 2.05, z: 0.033}
+  - {name: tennis_ball_12, x: 3.48, y: 1.93, z: 0.033}
+  - {name: tennis_ball_13, x: 3.58, y: 2.12, z: 0.033}
+  - {name: tennis_ball_14, x: 3.42, y: 2.24, z: 0.033}
+  - {name: tennis_ball_15, x: 3.61, y: 1.99, z: 0.033}
+
+  - {name: tennis_ball_16, x: 4.55, y: -2.10, z: 0.033}
+  - {name: tennis_ball_17, x: 4.68, y: -1.97, z: 0.033}
+  - {name: tennis_ball_18, x: 4.79, y: -2.15, z: 0.033}
+  - {name: tennis_ball_19, x: 4.61, y: -2.27, z: 0.033}
+  - {name: tennis_ball_20, x: 4.82, y: -2.00, z: 0.033}
+
+  - {name: tennis_ball_21, x: 5.75, y: 0.75, z: 0.033}
+  - {name: tennis_ball_22, x: 5.87, y: 0.63, z: 0.033}
+  - {name: tennis_ball_23, x: 5.99, y: 0.81, z: 0.033}
+  - {name: tennis_ball_24, x: 5.81, y: 0.92, z: 0.033}
+  - {name: tennis_ball_25, x: 6.02, y: 0.68, z: 0.033}
+
+  - {name: tennis_ball_26, x: 7.10, y: -1.70, z: 0.033}
+  - {name: tennis_ball_27, x: 7.23, y: -1.57, z: 0.033}
+  - {name: tennis_ball_28, x: 7.34, y: -1.75, z: 0.033}
+  - {name: tennis_ball_29, x: 7.17, y: -1.87, z: 0.033}
+  - {name: tennis_ball_30, x: 7.38, y: -1.60, z: 0.033}

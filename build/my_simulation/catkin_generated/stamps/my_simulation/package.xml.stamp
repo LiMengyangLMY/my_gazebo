@@ -27,8 +27,10 @@
 
   <build_depend>image_transport</build_depend>
   <build_depend>sensor_msgs</build_depend>
+  <build_depend>rospy</build_depend>
   <exec_depend>image_transport</exec_depend>
   <exec_depend>sensor_msgs</exec_depend>
+  <exec_depend>rospy</exec_depend>
 
   <export>
   </export>

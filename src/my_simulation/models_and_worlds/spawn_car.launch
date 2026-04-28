@@ -3,6 +3,8 @@
   <arg name="wait_for_manual_start" default="false"/>
   <arg name="startup_delay_sec" default="0.0"/>
   <arg name="artifacts_output_dir" default=""/>
+  <arg name="strategy" default="segment"/>
+  <arg name="scene_file" default="$(find my_simulation)/config/scenes/demo_4.yaml"/>
 
   <!-- 1. 加载 URDF 机器人模型 -->
   <param name="robot_description" command="cat /home/lmy/catkin_ws/src/my_simulation/models_and_worlds/simple_car.urdf"/>
@@ -19,6 +21,11 @@
   <node name="spawn_urdf" pkg="gazebo_ros" type="spawn_model" output="screen"
         args="-param robot_description -urdf -model simple_car -x 0.8 -y 0 -z 0.05"/>
 
+  <node name="ball_scene_spawner" pkg="my_simulation" type="ball_scene_spawner.py" output="screen">
+    <rosparam command="load" file="$(arg scene_file)"/>
+    <param name="ball_radius" value="0.033"/>
+  </node>
+
   <!-- 4. 第二阶段最小闭环控制节点 -->
   <node name="stereo_node" pkg="my_simulation" type="stereo_node" output="screen">
     <param name="config_path" value="/home/lmy/catkin_ws/src/my_simulation/config/stereo_config.yaml"/>
@@ -31,8 +38,9 @@
 
   <!-- 5. 第二阶段最小闭环控制节点 -->
   <node name="ball_pickup_controller" pkg="my_simulation" type="ball_pickup_controller" output="screen">
+    <rosparam command="load" file="$(arg scene_file)"/>
     <param name="robot_model_name" value="simple_car"/>
-    <param name="strategy" value="segment"/>
+    <param name="strategy" value="$(arg strategy)"/>
     <param name="control_frequency" value="20.0"/>
     <param name="max_linear_speed" value="0.4"/>
     <param name="max_angular_speed" value="0.8"/>
@@ -44,6 +52,5 @@
     <param name="startup_delay_sec" value="$(arg startup_delay_sec)"/>
     <param name="wait_for_manual_start" value="$(arg wait_for_manual_start)"/>
     <param name="artifacts_output_dir" value="$(arg artifacts_output_dir)"/>
-    <rosparam param="ball_names">[tennis_ball_1, tennis_ball_2, tennis_ball_3, tennis_ball_4]</rosparam>
   </node>
 </launch>

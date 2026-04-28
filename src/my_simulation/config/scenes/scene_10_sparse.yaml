@@ -1,0 +1,26 @@
+scene_name: mixed_10_near
+ball_names:
+  - tennis_ball_1
+  - tennis_ball_2
+  - tennis_ball_3
+  - tennis_ball_4
+  - tennis_ball_5
+  - tennis_ball_6
+  - tennis_ball_7
+  - tennis_ball_8
+  - tennis_ball_9
+  - tennis_ball_10
+balls:
+  - {name: tennis_ball_1, x: 1.35, y: 0.95, z: 0.033}
+  - {name: tennis_ball_2, x: 1.52, y: 0.82, z: 0.033}
+  - {name: tennis_ball_3, x: 1.68, y: 1.06, z: 0.033}
+
+  - {name: tennis_ball_4, x: 2.05, y: -0.95, z: 0.033}
+  - {name: tennis_ball_5, x: 2.55, y: 0.10, z: 0.033}
+
+  - {name: tennis_ball_6, x: 2.95, y: -1.18, z: 0.033}
+  - {name: tennis_ball_7, x: 3.12, y: -1.04, z: 0.033}
+  - {name: tennis_ball_8, x: 3.28, y: -1.26, z: 0.033}
+
+  - {name: tennis_ball_9, x: 3.85, y: 1.22, z: 0.033}
+  - {name: tennis_ball_10, x: 4.45, y: -0.32, z: 0.033}

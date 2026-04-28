@@ -18,7 +18,9 @@ mkdir -p "${LOCAL_RECORD_DIR}"
 mkdir -p "${EXPORT_DIR}"
 
 TIMESTAMP="$(date +%Y%m%d_%H%M%S)"
-OUTPUT_PREFIX="${1:-tennis_pickup_screen_${TIMESTAMP}}"
+STRATEGY="${2:-segment}"
+SCENE_KEY="${3:-demo4}"
+OUTPUT_PREFIX="${1:-${SCENE_KEY}_${STRATEGY}_pickup_screen_${TIMESTAMP}}"
 SESSION_LOCAL_DIR="${LOCAL_RECORD_DIR}/${OUTPUT_PREFIX}"
 SESSION_EXPORT_DIR="${EXPORT_DIR}/${OUTPUT_PREFIX}"
 RAW_FILE="${SESSION_LOCAL_DIR}/screen.mkv"
@@ -60,6 +62,37 @@ if [[ -z "${DISPLAY:-}" ]]; then
   echo "DISPLAY 未设置，无法打开图形界面或录屏。"
   exit 1
 fi
+
+if [[ "${STRATEGY}" != "point" && "${STRATEGY}" != "segment" ]]; then
+  echo "策略参数无效: ${STRATEGY}，只支持 point 或 segment。"
+  exit 1
+fi
+
+resolve_scene_file() {
+  case "${SCENE_KEY}" in
+    demo4)
+      echo "${WORKSPACE_ROOT}/src/my_simulation/config/scenes/demo_4.yaml"
+      ;;
+    sparse10)
+      echo "${WORKSPACE_ROOT}/src/my_simulation/config/scenes/scene_10_sparse.yaml"
+      ;;
+    cluster30)
+      echo "${WORKSPACE_ROOT}/src/my_simulation/config/scenes/scene_30_clustered.yaml"
+      ;;
+    *)
+      if [[ -f "${SCENE_KEY}" ]]; then
+        echo "${SCENE_KEY}"
+      else
+        return 1
+      fi
+      ;;
+  esac
+}
+
+SCENE_FILE="$(resolve_scene_file)" || {
+  echo "场景参数无效: ${SCENE_KEY}，支持 demo4、sparse10、cluster30，或直接传入 scene yaml 路径。"
+  exit 1
+}
 
 ROS_PIDS=()
 VIEW_PIDS=()
@@ -273,7 +306,9 @@ roslaunch my_simulation spawn_car.launch \
   paused:=false \
   wait_for_manual_start:=true \
   startup_delay_sec:=0.0 \
-  artifacts_output_dir:="${SESSION_EXPORT_DIR}" &
+  artifacts_output_dir:="${SESSION_EXPORT_DIR}" \
+  strategy:="${STRATEGY}" \
+  scene_file:="${SCENE_FILE}" &
 ROS_PIDS+=($!)
 
 echo "等待仿真节点与双目话题就绪..."
@@ -311,6 +346,8 @@ echo "发送开始捡球信号。"
 call_trigger_rosservice "/ball_pickup_controller/start"
 
 echo "录屏已开始，小车已开始捡球。按 Ctrl+C 可停止并自动导出 mp4。"
+echo "当前策略: ${STRATEGY}"
+echo "当前场景: ${SCENE_KEY}"
 echo "结果目录: ${SESSION_EXPORT_DIR}"
 echo "输出文件前缀: ${OUTPUT_PREFIX}"
 

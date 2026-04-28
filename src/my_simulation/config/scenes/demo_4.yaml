@@ -1,0 +1,11 @@
+scene_name: demo_4
+ball_names:
+  - tennis_ball_1
+  - tennis_ball_2
+  - tennis_ball_3
+  - tennis_ball_4
+balls:
+  - {name: tennis_ball_1, x: 1.20, y: 0.85, z: 0.033}
+  - {name: tennis_ball_2, x: 2.10, y: -0.60, z: 0.033}
+  - {name: tennis_ball_3, x: 3.10, y: 1.40, z: 0.033}
+  - {name: tennis_ball_4, x: 4.00, y: -1.10, z: 0.033}

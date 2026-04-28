@@ -1,0 +1,16 @@
+<launch>
+  <arg name="paused" default="false"/>
+  <arg name="wait_for_manual_start" default="false"/>
+  <arg name="startup_delay_sec" default="0.0"/>
+  <arg name="artifacts_output_dir" default=""/>
+  <arg name="scene_file" default="$(find my_simulation)/config/scenes/demo_4.yaml"/>
+
+  <include file="$(find my_simulation)/models_and_worlds/spawn_car.launch">
+    <arg name="paused" value="$(arg paused)"/>
+    <arg name="wait_for_manual_start" value="$(arg wait_for_manual_start)"/>
+    <arg name="startup_delay_sec" value="$(arg startup_delay_sec)"/>
+    <arg name="artifacts_output_dir" value="$(arg artifacts_output_dir)"/>
+    <arg name="scene_file" value="$(arg scene_file)"/>
+    <arg name="strategy" value="point"/>
+  </include>
+</launch>

@@ -1,0 +1,5 @@
+<launch>
+  <include file="$(find my_simulation)/models_and_worlds/spawn_car_segment.launch">
+    <arg name="scene_file" value="$(find my_simulation)/config/scenes/scene_10_sparse.yaml"/>
+  </include>
+</launch>

@@ -12,6 +12,7 @@ set(CMAKE_CXX_STANDARD_REQUIRED True)
 # (加入了处理 ROS 图像消息所需的 sensor_msgs, cv_bridge, image_transport)
 find_package(catkin REQUIRED COMPONENTS
   roscpp
+  rospy
   std_msgs
   geometry_msgs
   gazebo_msgs
@@ -52,4 +53,9 @@ install(TARGETS stereo_node ball_pickup_controller
   RUNTIME DESTINATION ${CATKIN_PACKAGE_BIN_DESTINATION}
   LIBRARY DESTINATION ${CATKIN_PACKAGE_LIB_DESTINATION}
   ARCHIVE DESTINATION ${CATKIN_PACKAGE_LIB_DESTINATION}
+)
+
+catkin_install_python(PROGRAMS
+  scripts/ball_scene_spawner.py
+  DESTINATION ${CATKIN_PACKAGE_BIN_DESTINATION}
 )

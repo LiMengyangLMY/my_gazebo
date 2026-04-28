@@ -73,6 +73,14 @@ private:
         ADVANCE
     };
 
+    bool isPointStrategy() const {
+        return strategy_ == "point";
+    }
+
+    std::string strategyDisplayName() const {
+        return isPointStrategy() ? "traditional_point" : "improved_segment";
+    }
+
     void loadParameters() {
         pnh_.param<std::string>("robot_model_name", robot_model_name_, "simple_car");
         pnh_.param<std::string>("strategy", strategy_, "segment");
@@ -89,6 +97,11 @@ private:
         pnh_.param("depth_error_margin", depth_error_margin_, 0.0356);
         pnh_.param("point_pick_heading_tolerance", point_pick_heading_tolerance_, 0.10);
         pnh_.param("point_pick_lateral_tolerance", point_pick_lateral_tolerance_, 0.05);
+        pnh_.param("point_stuck_timeout_sec", point_stuck_timeout_sec_, 1.5);
+        pnh_.param("point_progress_score_epsilon", point_progress_score_epsilon_, 0.015);
+        pnh_.param("point_recovery_forward_speed", point_recovery_forward_speed_, 0.08);
+        pnh_.param("point_recovery_turn_speed", point_recovery_turn_speed_, 0.45);
+        pnh_.param("point_recovery_duration_sec", point_recovery_duration_sec_, 0.60);
         pnh_.param("rotate_only_heading_threshold", rotate_only_heading_threshold_, 0.35);
         pnh_.param("forward_control_heading_threshold", forward_control_heading_threshold_, 0.60);
         pnh_.param("target_loss_timeout", target_loss_timeout_, 0.5);
@@ -98,6 +111,8 @@ private:
         pnh_.param("segment_heading_exit_tolerance", segment_heading_exit_tolerance_, 0.24);
         pnh_.param("segment_lateral_enter_tolerance", segment_lateral_enter_tolerance_, 0.10);
         pnh_.param("segment_lateral_exit_tolerance", segment_lateral_exit_tolerance_, 0.18);
+        pnh_.param("segment_pickup_band_hysteresis", segment_pickup_band_hysteresis_, 0.06);
+        pnh_.param("segment_advance_max_angular_speed", segment_advance_max_angular_speed_, 0.35);
         pnh_.param("point_heading_exit_tolerance", point_heading_exit_tolerance_, 0.18);
         pnh_.param("point_lateral_exit_tolerance", point_lateral_exit_tolerance_, 0.09);
         pnh_.param("startup_delay_sec", startup_delay_sec_, 0.0);
@@ -106,6 +121,11 @@ private:
 
         if (!pnh_.getParam("ball_names", ball_names_)) {
             ball_names_ = {"tennis_ball_1", "tennis_ball_2", "tennis_ball_3", "tennis_ball_4"};
+        }
+
+        if (strategy_ != "point" && strategy_ != "segment") {
+            ROS_WARN("Unknown strategy '%s', fallback to 'segment'.", strategy_.c_str());
+            strategy_ = "segment";
         }
 
         manual_start_requested_ = !wait_for_manual_start_;
@@ -245,12 +265,148 @@ private:
         return true;
     }
 
-    bool isPickupSuccess(double rel_forward, double rel_lateral) const {
-        const double effective_half_width = pickup_half_width_ + x_error_margin_;
+    bool isPickupSuccess(bool point_strategy,
+                         double rel_forward,
+                         double rel_lateral,
+                         double heading) const {
         const double effective_depth_tolerance = ball_radius_ + pickup_tolerance_ + depth_error_margin_;
+
+        if (point_strategy) {
+            const double effective_lateral_tolerance = point_pick_lateral_tolerance_ + x_error_margin_;
+            const double effective_heading_tolerance = point_pick_heading_tolerance_;
+            return std::abs(rel_lateral) <= effective_lateral_tolerance &&
+                   std::abs(heading) <= effective_heading_tolerance &&
+                   std::abs(rel_forward - front_boundary_x_) <= effective_depth_tolerance;
+        }
+
+        const double effective_half_width = pickup_half_width_ + x_error_margin_;
+        return std::abs(rel_lateral) <= effective_half_width &&
+               std::abs(rel_forward - front_boundary_x_) <= effective_depth_tolerance;
+    }
+
+    bool isSegmentAdvanceReady(double rel_forward, double rel_lateral) const {
+        if (rel_forward <= 0.0) {
+            return false;
+        }
+
+        const double effective_half_width = pickup_half_width_ + x_error_margin_;
+        return std::abs(rel_lateral) <= effective_half_width;
+    }
+
+    double pointProgressScore(double rel_lateral, double heading) const {
+        return 1.4 * std::abs(heading) + 1.0 * std::abs(rel_lateral);
+    }
+
+    void resetPointRecoveryTracking() {
+        point_progress_initialized_ = false;
+        point_recovery_active_ = false;
+        point_recovery_end_time_ = ros::Time();
+    }
+
+    void beginPointRecovery(double rel_lateral) {
+        point_recovery_active_ = true;
+        point_recovery_end_time_ = ros::Time::now() + ros::Duration(point_recovery_duration_sec_);
+
+        if (std::abs(rel_lateral) > 1e-3) {
+            point_recovery_turn_sign_ = (rel_lateral >= 0.0) ? -1.0 : 1.0;
+        } else {
+            point_recovery_turn_sign_ *= -1.0;
+        }
+
+        ++point_recovery_count_;
+        current_target_name_.clear();
+        control_mode_ = ControlMode::ROTATE_ONLY;
+        point_progress_initialized_ = false;
+
+        ROS_WARN("Point strategy stuck detected, applying short forward recovery.");
+    }
+
+    bool handlePointRecoveryIfActive() {
+        if (!point_recovery_active_) {
+            return false;
+        }
+
+        if (ros::Time::now() >= point_recovery_end_time_) {
+            point_recovery_active_ = false;
+            point_progress_initialized_ = false;
+            stopRobot();
+            return false;
+        }
+
+        geometry_msgs::Twist cmd;
+        cmd.linear.x = point_recovery_forward_speed_;
+        cmd.angular.z = point_recovery_turn_sign_ * point_recovery_turn_speed_;
+        cmd_pub_.publish(cmd);
+        return true;
+    }
+
+    void updatePointProgress(const std::string& target_name,
+                             double rel_lateral,
+                             double heading) {
+        const double score = pointProgressScore(rel_lateral, heading);
+
+        if (!point_progress_initialized_ || point_progress_target_name_ != target_name) {
+            point_progress_initialized_ = true;
+            point_progress_target_name_ = target_name;
+            point_best_progress_score_ = score;
+            point_last_progress_time_ = ros::Time::now();
+            return;
+        }
+
+        if (score < (point_best_progress_score_ - point_progress_score_epsilon_)) {
+            point_best_progress_score_ = score;
+            point_last_progress_time_ = ros::Time::now();
+        }
+    }
+
+    bool isBallWithinPickupBand(bool point_strategy,
+                                double rel_forward,
+                                double rel_lateral) const {
+        const double effective_depth_tolerance = ball_radius_ + pickup_tolerance_ + depth_error_margin_;
+        const double effective_half_width = point_strategy
+            ? (point_pick_lateral_tolerance_ + x_error_margin_)
+            : (pickup_half_width_ + x_error_margin_);
 
         return std::abs(rel_lateral) <= effective_half_width &&
                std::abs(rel_forward - front_boundary_x_) <= effective_depth_tolerance;
+    }
+
+    bool pickupBallsInContactBand(double robot_x, double robot_y, double robot_yaw) {
+        const bool point_strategy = isPointStrategy();
+        std::vector<std::string> touched_balls;
+
+        for (const std::string& ball_name : ball_names_) {
+            auto it = balls_.find(ball_name);
+            if (it == balls_.end()) {
+                continue;
+            }
+
+            const BallInfo& ball = it->second;
+            if (ball.picked || !ball.visible) {
+                continue;
+            }
+
+            double rel_forward = 0.0;
+            double rel_lateral = 0.0;
+            double heading = 0.0;
+            double distance = 0.0;
+            computeRelativeTarget(ball, robot_x, robot_y, robot_yaw, rel_forward, rel_lateral, heading, distance);
+
+            if (isBallWithinPickupBand(point_strategy, rel_forward, rel_lateral)) {
+                touched_balls.push_back(ball.name);
+            }
+        }
+
+        for (const std::string& ball_name : touched_balls) {
+            removePickedBall(ball_name);
+        }
+
+        if (!touched_balls.empty()) {
+            ROS_INFO("Picked %zu ball(s) from contact band.", touched_balls.size());
+            return true;
+        }
+
+        return false;
     }
 
     void removePickedBall(const std::string& ball_name) {
@@ -267,6 +423,7 @@ private:
             current_target_name_.clear();
             control_mode_ = ControlMode::ROTATE_ONLY;
         }
+        resetPointRecoveryTracking();
 
         gazebo_msgs::DeleteModel delete_srv;
         delete_srv.request.model_name = ball_name;
@@ -295,6 +452,7 @@ private:
         startup_time_initialized_ = true;
         current_target_name_.clear();
         control_mode_ = ControlMode::ROTATE_ONLY;
+        resetPointRecoveryTracking();
 
         response.success = true;
         response.message = "ball_pickup_controller start accepted";
@@ -513,6 +671,7 @@ private:
 
         ofs << "# Pickup Experiment Summary\n\n";
         ofs << "- Strategy: `" << strategy_ << "`\n";
+        ofs << "- Strategy label: `" << strategyDisplayName() << "`\n";
         ofs << "- Robot model: `" << robot_model_name_ << "`\n";
         ofs << "- Balls configured: `" << ball_names_.size() << "`\n";
         ofs << "- Balls picked: `" << picked_ball_count_ << "`\n";
@@ -520,7 +679,8 @@ private:
         ofs << "- Total pickup time (sim): `" << formatDouble(duration_sec, 3) << " s`\n";
         ofs << "- Total traveled distance: `" << formatDouble(total_path_length_m_, 3) << " m`\n";
         ofs << "- Average path speed: `" << formatDouble(avg_speed, 3) << " m/s`\n";
-        ofs << "- Path samples: `" << path_samples_.size() << "`\n\n";
+        ofs << "- Path samples: `" << path_samples_.size() << "`\n";
+        ofs << "- Point recovery count: `" << point_recovery_count_ << "`\n\n";
 
         if (!path_samples_.empty()) {
             const PathSample& first = path_samples_.front();
@@ -577,7 +737,11 @@ private:
         return (control_mode_ == ControlMode::ROTATE_ONLY) ? "ROTATE_ONLY" : "ADVANCE";
     }
 
-    void updateControlMode(bool point_strategy, double heading_abs, double lateral_abs) {
+    void updateControlMode(bool point_strategy,
+                           double rel_forward,
+                           double rel_lateral,
+                           double heading_abs,
+                           double lateral_abs) {
         if (point_strategy) {
             if (control_mode_ == ControlMode::ROTATE_ONLY) {
                 if (heading_abs <= point_pick_heading_tolerance_ &&
@@ -591,14 +755,17 @@ private:
                 }
             }
         } else {
+            const double effective_half_width = pickup_half_width_ + x_error_margin_;
+            const double exit_half_width = effective_half_width + segment_pickup_band_hysteresis_;
+
             if (control_mode_ == ControlMode::ROTATE_ONLY) {
-                if (heading_abs <= segment_heading_enter_tolerance_ &&
-                    lateral_abs <= segment_lateral_enter_tolerance_) {
+                if (isSegmentAdvanceReady(rel_forward, rel_lateral)) {
                     control_mode_ = ControlMode::ADVANCE;
                 }
             } else {
-                if (heading_abs > segment_heading_exit_tolerance_ ||
-                    lateral_abs > segment_lateral_exit_tolerance_) {
+                if (rel_forward <= 0.0 ||
+                    lateral_abs > exit_half_width ||
+                    heading_abs > segment_heading_exit_tolerance_) {
                     control_mode_ = ControlMode::ROTATE_ONLY;
                 }
             }
@@ -608,12 +775,12 @@ private:
     void publishControl(double rel_forward, double rel_lateral, double heading, double distance) {
         geometry_msgs::Twist cmd;
 
-        const bool point_strategy = (strategy_ == "point");
+        const bool point_strategy = isPointStrategy();
         const double heading_abs = std::abs(heading);
         const double lateral_abs = std::abs(rel_lateral);
         const double forward_error = std::max(0.0, rel_forward - front_boundary_x_);
 
-        updateControlMode(point_strategy, heading_abs, lateral_abs);
+        updateControlMode(point_strategy, rel_forward, rel_lateral, heading_abs, lateral_abs);
 
         double heading_cmd = (heading_abs > heading_deadband_) ? heading : 0.0;
         double reduced_heading_gain = (forward_error < 0.50) ? (0.45 * heading_gain_) : (0.75 * heading_gain_);
@@ -632,7 +799,7 @@ private:
                     ? 1.0
                     : clamp(1.0 - lateral_abs / std::max(0.20, pickup_half_width_), 0.35, 1.0);
                 linear_cmd *= lateral_scale;
-                linear_cmd = std::max(0.08, linear_cmd);
+                linear_cmd = std::max(0.12, linear_cmd);
             }
 
             if (forward_error < 0.10) {
@@ -642,7 +809,14 @@ private:
             }
 
             cmd.linear.x = linear_cmd;
-            cmd.angular.z = clamp(reduced_heading_gain * heading_cmd, -max_angular_speed_, max_angular_speed_);
+            if (point_strategy) {
+                cmd.angular.z = clamp(reduced_heading_gain * heading_cmd, -max_angular_speed_, max_angular_speed_);
+            } else {
+                const double segment_heading_gain = (forward_error < 0.50) ? (0.18 * heading_gain_) : (0.30 * heading_gain_);
+                cmd.angular.z = clamp(segment_heading_gain * heading_cmd,
+                                      -segment_advance_max_angular_speed_,
+                                      segment_advance_max_angular_speed_);
+            }
         }
 
         if (distance < front_boundary_x_) {
@@ -681,6 +855,15 @@ private:
 
         recordPathSample(robot_x, robot_y, robot_yaw);
 
+        if (isPointStrategy() && handlePointRecoveryIfActive()) {
+            return;
+        }
+
+        if (pickupBallsInContactBand(robot_x, robot_y, robot_yaw)) {
+            stopRobot();
+            return;
+        }
+
         std::string target_name;
         if (!selectTargetWithLock(robot_x, robot_y, target_name)) {
             stopRobot();
@@ -699,7 +882,16 @@ private:
         double distance = 0.0;
         computeRelativeTarget(target_ball, robot_x, robot_y, robot_yaw, rel_forward, rel_lateral, heading, distance);
 
-        if (isPickupSuccess(rel_forward, rel_lateral)) {
+        if (isPointStrategy()) {
+            updatePointProgress(target_name, rel_lateral, heading);
+            if (!point_last_progress_time_.isZero() &&
+                (ros::Time::now() - point_last_progress_time_).toSec() >= point_stuck_timeout_sec_) {
+                beginPointRecovery(rel_lateral);
+                return;
+            }
+        }
+
+        if (isPickupSuccess(isPointStrategy(), rel_forward, rel_lateral, heading)) {
             stopRobot();
             removePickedBall(target_name);
             return;
@@ -741,6 +933,11 @@ private:
     double depth_error_margin_ = 0.0356;
     double point_pick_heading_tolerance_ = 0.10;
     double point_pick_lateral_tolerance_ = 0.05;
+    double point_stuck_timeout_sec_ = 1.5;
+    double point_progress_score_epsilon_ = 0.015;
+    double point_recovery_forward_speed_ = 0.08;
+    double point_recovery_turn_speed_ = 0.45;
+    double point_recovery_duration_sec_ = 0.60;
     double rotate_only_heading_threshold_ = 0.35;
     double forward_control_heading_threshold_ = 0.60;
     double target_loss_timeout_ = 0.5;
@@ -750,6 +947,8 @@ private:
     double segment_heading_exit_tolerance_ = 0.24;
     double segment_lateral_enter_tolerance_ = 0.10;
     double segment_lateral_exit_tolerance_ = 0.18;
+    double segment_pickup_band_hysteresis_ = 0.06;
+    double segment_advance_max_angular_speed_ = 0.35;
     double point_heading_exit_tolerance_ = 0.18;
     double point_lateral_exit_tolerance_ = 0.09;
     double startup_delay_sec_ = 0.0;
@@ -764,6 +963,14 @@ private:
     bool artifacts_written_ = false;
     ros::Time run_start_time_;
     ros::Time run_end_time_;
+    bool point_progress_initialized_ = false;
+    std::string point_progress_target_name_;
+    double point_best_progress_score_ = std::numeric_limits<double>::max();
+    ros::Time point_last_progress_time_;
+    bool point_recovery_active_ = false;
+    ros::Time point_recovery_end_time_;
+    double point_recovery_turn_sign_ = 1.0;
+    int point_recovery_count_ = 0;
 
     std::string current_target_name_;
     ControlMode control_mode_ = ControlMode::ROTATE_ONLY;
