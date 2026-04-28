@@ -101,12 +101,23 @@ catkin_ws/
 └── src/
     └── my_simulation/
         ├── config/
-        │   └── stereo_config.yaml
+        │   ├── stereo_config.yaml
+        │   └── scenes/
+        │       ├── demo_4.yaml
+        │       ├── scene_10_sparse.yaml
+        │       └── scene_30_clustered.yaml
         ├── models_and_worlds/
         │   ├── simple_car.urdf
         │   ├── spawn_car.launch
+        │   ├── spawn_car_point.launch
+        │   ├── spawn_car_segment.launch
+        │   ├── spawn_car_point_10.launch
+        │   ├── spawn_car_segment_10.launch
+        │   ├── spawn_car_point_30_cluster.launch
+        │   └── spawn_car_segment_30_cluster.launch
         │   └── tennis_court.world
         ├── scripts/
+        │   ├── ball_scene_spawner.py
         │   └── run_sim_with_views_and_screen_record.sh
         ├── src/
         │   ├── stereo_vision_localization.cpp
@@ -245,6 +256,9 @@ g++ -std=c++14 src/my_simulation/src/stereo_vision_localization.cpp \
 - Gazebo 载入网球场、小车、双目相机和网球模型
 - `stereo_node` 实时订阅 `/stereo_camera/left/image_raw` 与 `/stereo_camera/right/image_raw`
 - `ball_pickup_controller` 负责最近可达球优先的拾取控制
+- 支持传统点目标策略 `point`
+- 支持改进线段目标策略 `segment`
+- 支持 YAML 场景文件驱动的网球批量生成
 - 左右视图使用 `image_view` 打开
 - 支持交互式整屏录制
 - 一次实验结束后自动导出视频、路径图和指标文档
@@ -253,6 +267,47 @@ g++ -std=c++14 src/my_simulation/src/stereo_vision_localization.cpp \
 
 - 当前控制闭环主要基于 Gazebo 中的模型真值，视觉节点用于实时展示识别与定位结果
 - 这样做的目的是保证当前阶段的演示稳定性，便于对比传统策略与改进策略的拾球时间
+
+## 双策略说明
+
+当前工程中提供两种拾球策略：
+
+### 1. 传统策略 `point`
+
+- 目标是尽量先让球对准车体中线
+- 只有在横向误差和朝向误差都足够小之后，才允许明显前进
+- 更接近“先对正，再接触”的传统点目标拾取逻辑
+
+为避免在局部聚集场景中长时间原地修正，当前版本给 `point` 策略增加了一个最小脱困机制：
+
+- 如果一段时间内对准误差没有明显改善
+- 控制器会执行一次短暂前进并轻微偏转
+- 然后重新锁定目标继续按传统方式对准
+
+### 2. 改进策略 `segment`
+
+- 只要目标球已经进入车前沿拾取带，就允许直接前进
+- 前进过程中只做较小角速度修正
+- 不要求先将球严格对准车体中线
+
+这更符合“车前沿触碰到球就算拾取成功”的设计目标。
+
+## 场景配置
+
+当前仿真场景不再把球位置写死在 `world` 文件中，而是通过 YAML 文件动态生成。已提供以下场景：
+
+- `demo_4`
+  4 球基础演示场景
+- `mixed_10_near`
+  10 球近距离、疏密兼具场景
+- `clustered_30`
+  30 球局部聚集场景，包含多个 3 球以上的密集簇
+
+对应文件：
+
+- `demo4` -> `src/my_simulation/config/scenes/demo_4.yaml`
+- `sparse10` -> `src/my_simulation/config/scenes/scene_10_sparse.yaml`
+- `cluster30` -> `src/my_simulation/config/scenes/scene_30_clustered.yaml`
 
 ## ROS 仿真运行
 
@@ -263,6 +318,32 @@ cd /home/lmy/catkin_ws
 source /opt/ros/noetic/setup.bash
 source /home/lmy/catkin_ws/devel/setup.bash
 roslaunch my_simulation spawn_car.launch
+```
+
+如果你要直接分别运行两种策略和两类主实验场景，推荐使用以下 launch：
+
+10 球传统：
+
+```bash
+roslaunch my_simulation spawn_car_point_10.launch
+```
+
+10 球改进：
+
+```bash
+roslaunch my_simulation spawn_car_segment_10.launch
+```
+
+30 球聚集传统：
+
+```bash
+roslaunch my_simulation spawn_car_point_30_cluster.launch
+```
+
+30 球聚集改进：
+
+```bash
+roslaunch my_simulation spawn_car_segment_30_cluster.launch
 ```
 
 如果只想手动查看左右相机视图：
@@ -281,11 +362,24 @@ cd /home/lmy/catkin_ws
 ./src/my_simulation/scripts/run_sim_with_views_and_screen_record.sh
 ```
 
-也可以自定义本次实验输出目录名：
+脚本支持 3 个参数：
+
+```bash
+./src/my_simulation/scripts/run_sim_with_views_and_screen_record.sh <output_prefix> <strategy> <scene_key>
+```
+
+- `output_prefix`
+  本次实验结果文件夹名
+- `strategy`
+  可选 `point` 或 `segment`
+- `scene_key`
+  可选 `demo4`、`sparse10`、`cluster30`
+
+例如：
 
 ```bash
 cd /home/lmy/catkin_ws
-./src/my_simulation/scripts/run_sim_with_views_and_screen_record.sh exp_case_1
+./src/my_simulation/scripts/run_sim_with_views_and_screen_record.sh exp_case_1 segment sparse10
 ```
 
 脚本流程如下：
@@ -322,6 +416,7 @@ cd /home/lmy/catkin_ws
 - 总拾球时间
 - 总行驶距离
 - 平均路径速度
+- 传统策略前进脱困触发次数 `Point recovery count`
 - 是否完成全部拾取
 - 起点和终点位姿
 - 每个球的初始位置
@@ -337,6 +432,8 @@ cd /home/lmy/catkin_ws
 - `data_multi_test` 中 4 组左右图可完整跑通
 - Gazebo 双目相机话题可正常发布
 - 左右视图可通过 `image_view` 正常显示
+- 支持 `point` / `segment` 两种拾球策略切换
+- 支持 4 球、10 球、30 球聚集场景切换
 - 交互式脚本可完成倒计时后同时开始录屏和捡球
 - 实验结束后可自动导出 `screen.mp4`、`path.csv`、`path.svg`、`metrics.md`
 

@@ -41,7 +41,7 @@
     <rosparam command="load" file="$(arg scene_file)"/>
     <param name="robot_model_name" value="simple_car"/>
     <param name="strategy" value="$(arg strategy)"/>
-    <param name="control_frequency" value="20.0"/>
+    <param name="control_frequency" value="12.0"/>
     <param name="max_linear_speed" value="0.4"/>
     <param name="max_angular_speed" value="0.8"/>
     <param name="front_boundary_x" value="0.25"/>
@@ -49,6 +49,18 @@
     <param name="pickup_tolerance" value="0.02"/>
     <param name="x_error_margin" value="0.0241"/>
     <param name="depth_error_margin" value="0.0356"/>
+    <param name="segment_pickup_side_shrink" value="0.0356"/>
+    <param name="point_pick_heading_tolerance" value="0.14"/>
+    <param name="point_pick_lateral_tolerance" value="0.07"/>
+    <param name="point_realign_heading_tolerance" value="0.40"/>
+    <param name="point_realign_lateral_tolerance" value="0.22"/>
+    <param name="advance_heading_deadband" value="0.12"/>
+    <param name="point_advance_lateral_deadband" value="0.08"/>
+    <param name="point_advance_max_angular_speed" value="0.12"/>
+    <param name="control_mode_hold_sec" value="0.45"/>
+    <param name="control_mode_switch_confirm_cycles" value="6"/>
+    <param name="linear_cmd_slew_rate" value="0.55"/>
+    <param name="angular_cmd_slew_rate" value="0.90"/>
     <param name="startup_delay_sec" value="$(arg startup_delay_sec)"/>
     <param name="wait_for_manual_start" value="$(arg wait_for_manual_start)"/>
     <param name="artifacts_output_dir" value="$(arg artifacts_output_dir)"/>

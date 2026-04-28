@@ -80,7 +80,7 @@
       <rightRearJoint>right_rear_wheel_joint</rightRearJoint>
       <wheelSeparation>0.54</wheelSeparation>
       <wheelDiameter>0.06</wheelDiameter>
-      <torque>20</torque>
+      <torque>10</torque>
       <commandTopic>/cmd_vel</commandTopic>
       <odometryTopic>/odom</odometryTopic>
       <odometryFrame>odom</odometryFrame>
