@@ -14,6 +14,18 @@
   <node name="spawn_urdf" pkg="gazebo_ros" type="spawn_model" output="screen"
         args="-param robot_description -urdf -model simple_car -x 0 -y 0 -z 0.05"/>
 
-  <!-- 4. 可选：加载差速驱动插件（如果 URDF 已经有 gazebo plugin） -->
-  <!-- 如果 URDF 内 gazebo plugin 配置正确，这里可以不用额外节点 -->
+  <!-- 4. 第二阶段最小闭环控制节点 -->
+  <node name="ball_pickup_controller" pkg="my_simulation" type="ball_pickup_controller" output="screen">
+    <param name="robot_model_name" value="simple_car"/>
+    <param name="strategy" value="segment"/>
+    <param name="control_frequency" value="20.0"/>
+    <param name="max_linear_speed" value="0.4"/>
+    <param name="max_angular_speed" value="0.8"/>
+    <param name="front_boundary_x" value="0.25"/>
+    <param name="pickup_half_width" value="0.25"/>
+    <param name="pickup_tolerance" value="0.02"/>
+    <param name="x_error_margin" value="0.0241"/>
+    <param name="depth_error_margin" value="0.0356"/>
+    <rosparam param="ball_names">[tennis_ball_1, tennis_ball_2, tennis_ball_3, tennis_ball_4]</rosparam>
+  </node>
 </launch>

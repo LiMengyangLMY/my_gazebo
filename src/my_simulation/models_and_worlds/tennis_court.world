@@ -254,7 +254,7 @@
           </material>
         </visual>
       </link>
-      <pose>1.0 1.0 0.033 0 0 0</pose>
+      <pose>1.20 0.85 0.033 0 0 0</pose>
     </model>
 
     <model name='tennis_ball_2'>
@@ -281,7 +281,7 @@
           </material>
         </visual>
       </link>
-      <pose>2.5 -0.5 0.033 0 0 0</pose>
+      <pose>2.10 -0.60 0.033 0 0 0</pose>
     </model>
 
     <model name='tennis_ball_3'>
@@ -308,7 +308,7 @@
           </material>
         </visual>
       </link>
-      <pose>-1.5 2.0 0.033 0 0 0</pose>
+      <pose>3.10 1.40 0.033 0 0 0</pose>
     </model>
 
     <model name='tennis_ball_4'>
@@ -335,7 +335,7 @@
           </material>
         </visual>
       </link>
-      <pose>4.0 3.0 0.033 0 0 0</pose>
+      <pose>4.00 -1.10 0.033 0 0 0</pose>
     </model>
   </world>
 </sdf>

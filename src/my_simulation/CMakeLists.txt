@@ -13,6 +13,8 @@ set(CMAKE_CXX_STANDARD_REQUIRED True)
 find_package(catkin REQUIRED COMPONENTS
   roscpp
   std_msgs
+  geometry_msgs
+  gazebo_msgs
   sensor_msgs
   cv_bridge
   image_transport
@@ -20,6 +22,9 @@ find_package(catkin REQUIRED COMPONENTS
 
 # 5. 寻找系统环境中的 OpenCV 库
 find_package(OpenCV REQUIRED)
+
+# 5.1 导出 catkin 包信息
+catkin_package()
 
 # 6. 包含所有依赖的头文件目录
 include_directories(
@@ -31,9 +36,20 @@ include_directories(
 # 7. 生成可执行文件
 # 节点名称定义为 stereo_node，指向 src 目录下的源码
 add_executable(stereo_node src/stereo_vision_localization.cpp)
+add_executable(ball_pickup_controller src/ball_pickup_controller.cpp)
 
 # 8. 将 ROS 通信库与 OpenCV 动态链接库合并链接到该节点
 target_link_libraries(stereo_node
   ${catkin_LIBRARIES}
   ${OpenCV_LIBS}
+)
+
+target_link_libraries(ball_pickup_controller
+  ${catkin_LIBRARIES}
+)
+
+install(TARGETS stereo_node ball_pickup_controller
+  RUNTIME DESTINATION ${CATKIN_PACKAGE_BIN_DESTINATION}
+  LIBRARY DESTINATION ${CATKIN_PACKAGE_LIB_DESTINATION}
+  ARCHIVE DESTINATION ${CATKIN_PACKAGE_LIB_DESTINATION}
 )
