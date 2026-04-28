@@ -230,6 +230,100 @@
       </link>
     </model>
 
+    <model name='tennis_net'>
+      <static>1</static>
+      <link name='net_link'>
+        <collision name='net_collision'>
+          <pose>0 0 0.457 0 0 0</pose>
+          <geometry>
+            <box>
+              <size>0.04 10.97 0.914</size>
+            </box>
+          </geometry>
+        </collision>
+        <visual name='net_visual'>
+          <pose>0 0 0.457 0 0 0</pose>
+          <geometry>
+            <box>
+              <size>0.02 10.97 0.914</size>
+            </box>
+          </geometry>
+          <material>
+            <ambient>0.15 0.15 0.15 0.85</ambient>
+            <diffuse>0.20 0.20 0.20 0.85</diffuse>
+            <specular>0.02 0.02 0.02 1</specular>
+          </material>
+        </visual>
+
+        <collision name='top_band_collision'>
+          <pose>0 0 0.927 0 0 0</pose>
+          <geometry>
+            <box>
+              <size>0.05 11.10 0.03</size>
+            </box>
+          </geometry>
+        </collision>
+        <visual name='top_band_visual'>
+          <pose>0 0 0.927 0 0 0</pose>
+          <geometry>
+            <box>
+              <size>0.05 11.10 0.03</size>
+            </box>
+          </geometry>
+          <material>
+            <ambient>0.96 0.96 0.96 1</ambient>
+            <diffuse>0.98 0.98 0.98 1</diffuse>
+          </material>
+        </visual>
+
+        <collision name='left_post_collision'>
+          <pose>0 5.55 0.535 0 0 0</pose>
+          <geometry>
+            <cylinder>
+              <radius>0.035</radius>
+              <length>1.07</length>
+            </cylinder>
+          </geometry>
+        </collision>
+        <visual name='left_post_visual'>
+          <pose>0 5.55 0.535 0 0 0</pose>
+          <geometry>
+            <cylinder>
+              <radius>0.035</radius>
+              <length>1.07</length>
+            </cylinder>
+          </geometry>
+          <material>
+            <ambient>0.75 0.75 0.75 1</ambient>
+            <diffuse>0.82 0.82 0.82 1</diffuse>
+          </material>
+        </visual>
+
+        <collision name='right_post_collision'>
+          <pose>0 -5.55 0.535 0 0 0</pose>
+          <geometry>
+            <cylinder>
+              <radius>0.035</radius>
+              <length>1.07</length>
+            </cylinder>
+          </geometry>
+        </collision>
+        <visual name='right_post_visual'>
+          <pose>0 -5.55 0.535 0 0 0</pose>
+          <geometry>
+            <cylinder>
+              <radius>0.035</radius>
+              <length>1.07</length>
+            </cylinder>
+          </geometry>
+          <material>
+            <ambient>0.75 0.75 0.75 1</ambient>
+            <diffuse>0.82 0.82 0.82 1</diffuse>
+          </material>
+        </visual>
+      </link>
+    </model>
+
     <model name='tennis_ball_1'>
       <static>1</static>
       <link name='link'>

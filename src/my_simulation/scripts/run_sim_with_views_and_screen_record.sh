@@ -1,0 +1,311 @@
+#!/usr/bin/env bash
+
+set -euo pipefail
+
+WORKSPACE_ROOT="/home/lmy/catkin_ws"
+ROS_SETUP="/opt/ros/noetic/setup.bash"
+CATKIN_SETUP="${WORKSPACE_ROOT}/devel/setup.bash"
+LOCAL_RECORD_DIR="${WORKSPACE_ROOT}/recordings_tmp"
+EXPORT_DIR="/mnt/hgfs/sharedFolder"
+SIM_LAUNCH_WAIT_SEC=10
+VIEW_LAUNCH_GAP_SEC=2
+WINDOW_WAIT_TIMEOUT_SEC=30
+CAMERA_STREAM_SETTLE_SEC=2
+FFMPEG_FRAME_RATE=25
+MANUAL_START_DELAY_SEC=5
+
+mkdir -p "${LOCAL_RECORD_DIR}"
+mkdir -p "${EXPORT_DIR}"
+
+TIMESTAMP="$(date +%Y%m%d_%H%M%S)"
+OUTPUT_PREFIX="${1:-tennis_pickup_screen_${TIMESTAMP}}"
+RAW_FILE="${LOCAL_RECORD_DIR}/${OUTPUT_PREFIX}_screen.mkv"
+FINAL_FILE="${EXPORT_DIR}/${OUTPUT_PREFIX}_screen.mp4"
+RECORD_LOG_FILE="${LOCAL_RECORD_DIR}/${OUTPUT_PREFIX}_screen_record.log"
+
+source "${ROS_SETUP}"
+source "${CATKIN_SETUP}"
+
+if ! command -v ffmpeg >/dev/null 2>&1; then
+  echo "ffmpeg 未安装，无法录屏。"
+  exit 1
+fi
+
+if ! command -v ffprobe >/dev/null 2>&1; then
+  echo "ffprobe 未安装，无法校验录屏文件。"
+  exit 1
+fi
+
+if ! command -v xprop >/dev/null 2>&1; then
+  echo "xprop 未安装，无法按进程定位窗口。"
+  exit 1
+fi
+
+if ! command -v xrandr >/dev/null 2>&1; then
+  echo "xrandr 未安装，无法获取屏幕分辨率。"
+  exit 1
+fi
+
+if ! command -v rosrun >/dev/null 2>&1; then
+  echo "rosrun 不可用，无法启动 image_view。"
+  exit 1
+fi
+
+if [[ -z "${DISPLAY:-}" ]]; then
+  echo "DISPLAY 未设置，无法打开图形界面或录屏。"
+  exit 1
+fi
+
+ROS_PIDS=()
+VIEW_PIDS=()
+FFMPEG_PID=""
+LAST_VIEW_WIN_ID=""
+LAST_VIEW_PID=""
+
+list_client_window_ids() {
+  xprop -root _NET_CLIENT_LIST 2>/dev/null | grep -o '0x[0-9a-f]\+'
+}
+
+window_pid_matches() {
+  local window_id="$1"
+  local target_pid="$2"
+  local pid_text
+  pid_text="$(xprop -id "${window_id}" _NET_WM_PID 2>/dev/null || true)"
+  [[ -n "${pid_text}" ]] && grep -Eq "= ${target_pid}$" <<< "${pid_text}"
+}
+
+wait_for_window_by_pid() {
+  local target_pid="$1"
+  local timeout_sec="$2"
+  local start_ts
+  start_ts="$(date +%s)"
+
+  while true; do
+    while IFS= read -r window_id; do
+      [[ -z "${window_id}" ]] && continue
+      if window_pid_matches "${window_id}" "${target_pid}"; then
+        echo "${window_id}"
+        return 0
+      fi
+    done < <(list_client_window_ids)
+
+    if (( $(date +%s) - start_ts >= timeout_sec )); then
+      echo "未能在 ${timeout_sec}s 内识别到 PID=${target_pid} 对应的窗口。" >&2
+      return 1
+    fi
+    sleep 1
+  done
+}
+
+launch_viewer() {
+  local topic="$1"
+  local role="$2"
+  local node_name="${role}_camera_view"
+  local window_name="${role}_camera_window"
+
+  rosrun image_view image_view \
+    image:="${topic}" \
+    __name:="${node_name}" \
+    _autosize:=true \
+    _window_name:="${window_name}" >/tmp/image_view_${role}.log 2>&1 &
+  local viewer_pid=$!
+  VIEW_PIDS+=("${viewer_pid}")
+  sleep 1
+
+  if ! kill -0 "${viewer_pid}" >/dev/null 2>&1; then
+    echo "${role} 图像窗口进程启动失败。" >&2
+    cat /tmp/image_view_${role}.log >&2 || true
+    return 1
+  fi
+
+  LAST_VIEW_PID="${viewer_pid}"
+  LAST_VIEW_WIN_ID="$(wait_for_window_by_pid "${viewer_pid}" "${WINDOW_WAIT_TIMEOUT_SEC}")"
+}
+
+wait_for_topic() {
+  local topic="$1"
+  local timeout_sec="$2"
+  local start_ts
+  start_ts="$(date +%s)"
+
+  while true; do
+    if rostopic list 2>/dev/null | grep -Fx "${topic}" >/dev/null 2>&1; then
+      return 0
+    fi
+
+    if (( $(date +%s) - start_ts >= timeout_sec )); then
+      echo "未能在 ${timeout_sec}s 内等到话题: ${topic}" >&2
+      return 1
+    fi
+    sleep 1
+  done
+}
+
+wait_for_service() {
+  local service_name="$1"
+  local timeout_sec="$2"
+  local start_ts
+  start_ts="$(date +%s)"
+
+  while true; do
+    if rosservice list 2>/dev/null | grep -Fx "${service_name}" >/dev/null 2>&1; then
+      return 0
+    fi
+
+    if (( $(date +%s) - start_ts >= timeout_sec )); then
+      echo "未能在 ${timeout_sec}s 内等到服务: ${service_name}" >&2
+      return 1
+    fi
+    sleep 1
+  done
+}
+
+call_trigger_rosservice() {
+  local service_name="$1"
+  rosservice call "${service_name}" >/dev/null
+}
+
+get_screen_geometry() {
+  local geometry
+  geometry="$(xrandr --current 2>/dev/null | awk '/\*/ {print $1; exit}')"
+  if [[ -z "${geometry}" ]]; then
+    echo "无法获取当前屏幕分辨率。" >&2
+    return 1
+  fi
+  echo "${geometry}"
+}
+
+start_screen_recording() {
+  local geometry="$1"
+
+  ffmpeg -y \
+    -nostdin \
+    -loglevel info \
+    -f x11grab \
+    -framerate "${FFMPEG_FRAME_RATE}" \
+    -video_size "${geometry}" \
+    -i "${DISPLAY}.0+0,0" \
+    -vf "pad=ceil(iw/2)*2:ceil(ih/2)*2" \
+    -c:v libx264 \
+    -crf 23 \
+    -preset veryfast \
+    -pix_fmt yuv420p \
+    -an \
+    "${RAW_FILE}" >"${RECORD_LOG_FILE}" 2>&1 &
+
+  FFMPEG_PID=$!
+  sleep 1
+
+  if ! kill -0 "${FFMPEG_PID}" >/dev/null 2>&1; then
+    echo "整屏录制进程启动失败。" >&2
+    cat "${RECORD_LOG_FILE}" >&2 || true
+    return 1
+  fi
+}
+
+stop_ffmpeg_cleanly() {
+  if [[ -n "${FFMPEG_PID}" ]] && kill -0 "${FFMPEG_PID}" >/dev/null 2>&1; then
+    kill -INT "${FFMPEG_PID}" >/dev/null 2>&1 || true
+    wait "${FFMPEG_PID}" >/dev/null 2>&1 || true
+  fi
+}
+
+stop_process_list() {
+  local -n ref="$1"
+  for pid in "${ref[@]}"; do
+    if kill -0 "${pid}" >/dev/null 2>&1; then
+      kill -INT "${pid}" >/dev/null 2>&1 || kill "${pid}" >/dev/null 2>&1 || true
+    fi
+  done
+  for pid in "${ref[@]}"; do
+    wait "${pid}" >/dev/null 2>&1 || true
+  done
+}
+
+export_video_if_valid() {
+  if [[ ! -s "${RAW_FILE}" ]]; then
+    echo "录屏文件为空，跳过导出: ${RAW_FILE}" >&2
+    [[ -f "${RECORD_LOG_FILE}" ]] && cat "${RECORD_LOG_FILE}" >&2 || true
+    return
+  fi
+
+  if ! ffprobe -v error -show_entries format=format_name -of default=nw=1:nk=1 "${RAW_FILE}" >/dev/null 2>&1; then
+    echo "录屏文件无效，跳过导出: ${RAW_FILE}" >&2
+    [[ -f "${RECORD_LOG_FILE}" ]] && cat "${RECORD_LOG_FILE}" >&2 || true
+    return
+  fi
+
+  ffmpeg -y \
+    -i "${RAW_FILE}" \
+    -c copy \
+    -movflags +faststart \
+    "${FINAL_FILE}" >/tmp/"${OUTPUT_PREFIX}_screen_remux.log" 2>&1 || {
+      echo "导出 mp4 失败: ${FINAL_FILE}" >&2
+      cat /tmp/"${OUTPUT_PREFIX}_screen_remux.log" >&2 || true
+      return
+    }
+
+  echo "导出的视频文件: ${FINAL_FILE}"
+}
+
+cleanup() {
+  local exit_code=$?
+  echo
+  echo "正在停止仿真、图像窗口和录屏..."
+
+  stop_ffmpeg_cleanly
+  stop_process_list VIEW_PIDS
+  stop_process_list ROS_PIDS
+  export_video_if_valid
+
+  exit ${exit_code}
+}
+
+trap cleanup EXIT INT TERM
+
+echo "启动 Gazebo 仿真（先暂停物理引擎）..."
+roslaunch my_simulation spawn_car.launch \
+  paused:=false \
+  wait_for_manual_start:=true \
+  startup_delay_sec:=0.0 &
+ROS_PIDS+=($!)
+
+echo "等待仿真节点与双目话题就绪..."
+sleep "${SIM_LAUNCH_WAIT_SEC}"
+wait_for_topic "/stereo_camera/left/image_raw" "${WINDOW_WAIT_TIMEOUT_SEC}"
+wait_for_topic "/stereo_camera/right/image_raw" "${WINDOW_WAIT_TIMEOUT_SEC}"
+wait_for_service "/ball_pickup_controller/start" "${WINDOW_WAIT_TIMEOUT_SEC}"
+sleep "${CAMERA_STREAM_SETTLE_SEC}"
+
+echo "打开左目图像窗口..."
+launch_viewer "/stereo_camera/left/image_raw" "left"
+
+sleep "${VIEW_LAUNCH_GAP_SEC}"
+
+echo "打开右目图像窗口..."
+launch_viewer "/stereo_camera/right/image_raw" "right"
+
+SCREEN_GEOMETRY="$(get_screen_geometry)"
+
+echo "窗口已准备好。"
+echo "请先手动摆好 Gazebo、左目、右目窗口。"
+echo "准备开始时，按回车键：脚本会先倒计时 ${MANUAL_START_DELAY_SEC} 秒，再同时开始整屏录制和捡球。"
+read -r
+
+echo "开始倒计时..."
+for remaining in $(seq "${MANUAL_START_DELAY_SEC}" -1 1); do
+  echo "  ${remaining}"
+  sleep 1
+done
+
+echo "开始整屏录制..."
+start_screen_recording "${SCREEN_GEOMETRY}"
+
+echo "发送开始捡球信号。"
+call_trigger_rosservice "/ball_pickup_controller/start"
+
+echo "录屏已开始，小车已开始捡球。按 Ctrl+C 可停止并自动导出 mp4。"
+echo "导出目录: ${EXPORT_DIR}"
+echo "输出文件前缀: ${OUTPUT_PREFIX}"
+
+wait

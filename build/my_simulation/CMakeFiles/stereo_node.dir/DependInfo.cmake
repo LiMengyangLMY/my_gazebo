@@ -20,7 +20,6 @@ set(CMAKE_CXX_TARGET_INCLUDE_PATH
   "/home/lmy/catkin_ws/src/my_simulation/include"
   "/opt/ros/noetic/include"
   "/opt/ros/noetic/share/xmlrpcpp/cmake/../../../include/xmlrpcpp"
-  "/usr/include/opencv4"
   "/usr/local/opencv-4.10/include/opencv4"
   )
 

@@ -1,0 +1,44 @@
+ffmpeg version git-2026-04-19-de18feb Copyright (c) 2000-2026 the FFmpeg developers
+  built with gcc 9 (Ubuntu 9.4.0-1ubuntu1~20.04.2)
+  configuration: --enable-shared --enable-gpl --enable-libx264
+  libavutil      60. 30.100 / 60. 30.100
+  libavcodec     62. 30.100 / 62. 30.100
+  libavformat    62. 13.102 / 62. 13.102
+  libavdevice    62.  4.100 / 62.  4.100
+  libavfilter    11. 15.101 / 11. 15.101
+  libswscale      9.  7.100 /  9.  7.100
+  libswresample   6.  4.100 /  6.  4.100
+Input #0, x11grab, from ':0':
+  Duration: N/A, start: 1777356865.735542, bitrate: 160126 kb/s
+  Stream #0:0: Video: rawvideo (BGR[0] / 0x524742), bgr0, 493x406, 160126 kb/s, 25 fps, 25 tbr, 1000k tbn, start 1777356865.735542
+Stream mapping:
+  Stream #0:0 -> #0:0 (rawvideo (native) -> h264 (libx264))
+[libx264 @ 0x55a0a2fa52c0] using cpu capabilities: MMX2 SSE2Fast SSSE3 SSE4.2 AVX FMA3 BMI2 AVX2
+[libx264 @ 0x55a0a2fa52c0] profile High, level 2.2
+[libx264 @ 0x55a0a2fa52c0] 264 - core 155 r2917 0a84d98 - H.264/MPEG-4 AVC codec - Copyleft 2003-2018 - http://www.videolan.org/x264.html - options: cabac=1 ref=1 deblock=1:0:0 analyse=0x3:0x113 me=hex subme=2 psy=1 psy_rd=1.00:0.00 mixed_ref=0 me_range=16 chroma_me=1 trellis=0 8x8dct=1 cqm=0 deadzone=21,11 fast_pskip=1 chroma_qp_offset=0 threads=6 lookahead_threads=2 sliced_threads=0 nr=0 decimate=1 interlaced=0 bluray_compat=0 constrained_intra=0 bframes=3 b_pyramid=2 b_adapt=1 b_bias=0 direct=1 weightb=1 open_gop=0 weightp=1 keyint=250 keyint_min=25 scenecut=40 intra_refresh=0 rc_lookahead=10 rc=crf mbtree=1 crf=23.0 qcomp=0.60 qpmin=0 qpmax=69 qpstep=4 ip_ratio=1.40 aq=1:1.00
+Output #0, matroska, to '/home/lmy/catkin_ws/recordings_tmp/tennis_pickup_demo_20260427_231357_left.mkv':
+  Metadata:
+    encoder         : Lavf62.13.102
+  Stream #0:0: Video: h264 (H264 / 0x34363248), yuv420p(tv, progressive), 494x406, q=2-31, 25 fps, 1k tbn
+    Metadata:
+      encoder         : Lavc62.30.100 libx264
+    Side data:
+      CPB properties: bitrate max/min/avg: 0/0/0 buffer size: 0 vbv_delay: N/A
+frame=    0 fps=0.0 q=0.0 size=       0KiB time=N/A bitrate=N/A speed=N/A elapsed=0:00:00.50    [out#0/matroska @ 0x55a0a2fa3900] video:9KiB audio:0KiB subtitle:0KiB other streams:0KiB global headers:0KiB muxing overhead: 8.920894%
+frame=   32 fps= 31 q=-1.0 Lsize=      10KiB time=00:00:01.20 bitrate=  67.6kbits/s speed=1.16x elapsed=0:00:01.03    
+[libx264 @ 0x55a0a2fa52c0] frame I:1     Avg QP:15.17  size:  7762
+[libx264 @ 0x55a0a2fa52c0] frame P:8     Avg QP:26.08  size:    52
+[libx264 @ 0x55a0a2fa52c0] frame B:23    Avg QP:31.71  size:    19
+[libx264 @ 0x55a0a2fa52c0] consecutive B-frames:  3.1%  0.0%  9.4% 87.5%
+[libx264 @ 0x55a0a2fa52c0] mb I  I16..4: 77.2%  0.6% 22.2%
+[libx264 @ 0x55a0a2fa52c0] mb P  I16..4:  0.3%  0.0%  0.0%  P16..4:  0.4%  0.0%  0.0%  0.0%  0.0%    skip:99.4%
+[libx264 @ 0x55a0a2fa52c0] mb B  I16..4:  0.1%  0.0%  0.0%  B16..8:  0.0%  0.0%  0.0%  direct: 0.0%  skip:99.9%  L0: 0.0% L1:100.0% BI: 0.0%
+[libx264 @ 0x55a0a2fa52c0] 8x8 transform intra:0.6% inter:13.0%
+[libx264 @ 0x55a0a2fa52c0] coded y,uvDC,uvAC intra: 16.5% 14.9% 13.7% inter: 0.0% 0.0% 0.0%
+[libx264 @ 0x55a0a2fa52c0] i16 v,h,dc,p: 80% 16%  3%  0%
+[libx264 @ 0x55a0a2fa52c0] i8 v,h,dc,ddl,ddr,vr,hd,vl,hu: 10% 55% 35%  0%  0%  0%  0%  0%  0%
+[libx264 @ 0x55a0a2fa52c0] i4 v,h,dc,ddl,ddr,vr,hd,vl,hu: 37% 30% 18%  2%  3%  3%  2%  3%  2%
+[libx264 @ 0x55a0a2fa52c0] i8c dc,h,v,p: 80% 10%  9%  1%
+[libx264 @ 0x55a0a2fa52c0] Weighted P-Frames: Y:0.0% UV:0.0%
+[libx264 @ 0x55a0a2fa52c0] kb/s:53.85
+Exiting normally, received signal 2.

@@ -1,0 +1,26 @@
+ffmpeg version git-2026-04-19-de18feb Copyright (c) 2000-2026 the FFmpeg developers
+  built with gcc 9 (Ubuntu 9.4.0-1ubuntu1~20.04.2)
+  configuration: --enable-shared --enable-gpl --enable-libx264
+  libavutil      60. 30.100 / 60. 30.100
+  libavcodec     62. 30.100 / 62. 30.100
+  libavformat    62. 13.102 / 62. 13.102
+  libavdevice    62.  4.100 / 62.  4.100
+  libavfilter    11. 15.101 / 11. 15.101
+  libswscale      9.  7.100 /  9.  7.100
+  libswresample   6.  4.100 /  6.  4.100
+Input #0, x11grab, from ':0':
+  Duration: N/A, start: 1777356708.867940, bitrate: 158742 kb/s
+  Stream #0:0: Video: rawvideo (BGR[0] / 0x524742), bgr0, 452x439, 158742 kb/s, 25 fps, 25 tbr, 1000k tbn, start 1777356708.867940
+Stream mapping:
+  Stream #0:0 -> #0:0 (rawvideo (native) -> h264 (libx264))
+[libx264 @ 0x5576d3053440] height not divisible by 2 (452x439)
+[vost#0:0/libx264 @ 0x5576d3052800] [enc:libx264 @ 0x5576d3053300] Error while opening encoder - maybe incorrect parameters such as bit_rate, rate, width or height.
+[vf#0:0 @ 0x5576d3057040] Error sending frames to consumers: Generic error in an external library
+[vf#0:0 @ 0x5576d3057040] Task finished with error code: -542398533 (Generic error in an external library)
+[vf#0:0 @ 0x5576d3057040] Terminating thread with return code -542398533 (Generic error in an external library)
+[vost#0:0/libx264 @ 0x5576d3052800] [enc:libx264 @ 0x5576d3053300] Could not open encoder before EOF
+[vost#0:0/libx264 @ 0x5576d3052800] Task finished with error code: -22 (Invalid argument)
+[vost#0:0/libx264 @ 0x5576d3052800] Terminating thread with return code -22 (Invalid argument)
+[out#0/matroska @ 0x5576d3051a00] Nothing was written into output file, because at least one of its streams received no packets.
+frame=    0 fps=0.0 q=0.0 Lsize=       0KiB time=N/A bitrate=N/A speed=N/A elapsed=0:00:00.03    
+Conversion failed!

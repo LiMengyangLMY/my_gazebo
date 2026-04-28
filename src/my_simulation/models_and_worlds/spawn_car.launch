@@ -1,20 +1,34 @@
 <launch>
+  <arg name="paused" default="false"/>
+  <arg name="wait_for_manual_start" default="false"/>
+  <arg name="startup_delay_sec" default="0.0"/>
+
   <!-- 1. 加载 URDF 机器人模型 -->
   <param name="robot_description" command="cat /home/lmy/catkin_ws/src/my_simulation/models_and_worlds/simple_car.urdf"/>
 
   <!-- 2. 启动 Gazebo 并加载 World -->
   <include file="/opt/ros/noetic/share/gazebo_ros/launch/empty_world.launch">
     <arg name="world_name" value="/home/lmy/catkin_ws/src/my_simulation/models_and_worlds/tennis_court.world"/>
-    <arg name="paused" value="false"/>
+    <arg name="paused" value="$(arg paused)"/>
     <arg name="use_sim_time" value="true"/>
     <arg name="gui" value="true"/>
   </include>
 
   <!-- 3. 在 Gazebo 中生成机器人 -->
   <node name="spawn_urdf" pkg="gazebo_ros" type="spawn_model" output="screen"
-        args="-param robot_description -urdf -model simple_car -x 0 -y 0 -z 0.05"/>
+        args="-param robot_description -urdf -model simple_car -x 0.8 -y 0 -z 0.05"/>
 
   <!-- 4. 第二阶段最小闭环控制节点 -->
+  <node name="stereo_node" pkg="my_simulation" type="stereo_node" output="screen">
+    <param name="config_path" value="/home/lmy/catkin_ws/src/my_simulation/config/stereo_config.yaml"/>
+    <param name="model_path" value="/home/lmy/catkin_ws/src/my_simulation/weights/best.onnx"/>
+    <param name="left_topic" value="/stereo_camera/left/image_raw"/>
+    <param name="right_topic" value="/stereo_camera/right/image_raw"/>
+    <param name="output_frame" value="camera_link"/>
+    <param name="sync_tolerance_sec" value="0.10"/>
+  </node>
+
+  <!-- 5. 第二阶段最小闭环控制节点 -->
   <node name="ball_pickup_controller" pkg="my_simulation" type="ball_pickup_controller" output="screen">
     <param name="robot_model_name" value="simple_car"/>
     <param name="strategy" value="segment"/>
@@ -26,6 +40,8 @@
     <param name="pickup_tolerance" value="0.02"/>
     <param name="x_error_margin" value="0.0241"/>
     <param name="depth_error_margin" value="0.0356"/>
+    <param name="startup_delay_sec" value="$(arg startup_delay_sec)"/>
+    <param name="wait_for_manual_start" value="$(arg wait_for_manual_start)"/>
     <rosparam param="ball_names">[tennis_ball_1, tennis_ball_2, tennis_ball_3, tennis_ball_4]</rosparam>
   </node>
 </launch>

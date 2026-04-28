@@ -1,9 +1,12 @@
 #include <algorithm>
 #include <cerrno>
 #include <cmath>
+#include <cstring>
 #include <iomanip>
 #include <iostream>
 #include <limits>
+#include <memory>
+#include <mutex>
 #include <sstream>
 #include <stdexcept>
 #include <string>
@@ -12,8 +15,13 @@
 #include <utility>
 #include <vector>
 
+#include <geometry_msgs/PoseArray.h>
+#include <geometry_msgs/PoseStamped.h>
+#include <image_transport/image_transport.h>
 #include <opencv2/dnn.hpp>
 #include <opencv2/opencv.hpp>
+#include <ros/ros.h>
+#include <sensor_msgs/Image.h>
 
 struct BoundingBox {
     int class_id = 0;
@@ -370,209 +378,277 @@ std::vector<std::pair<BoundingBox, BoundingBox>> matchBoundingBoxes(std::vector<
     return matched_pairs;
 }
 
-void printTableHeader() {
-    std::cout << "\n" << std::string(95, '=') << "\n";
-    std::cout << "| " << std::left << std::setw(13) << "图片名称"
-              << " | " << std::setw(12) << "检测目标"
-              << " | " << std::setw(14) << "视差深度(cm)"
-              << " | " << std::setw(16) << "最终融合深度(cm)"
-              << " | " << std::setw(15) << "最终X轴偏移(cm)"
-              << " |\n";
-    std::cout << std::string(95, '-') << "\n";
+cv::Mat imageMsgToBgr(const sensor_msgs::ImageConstPtr& msg) {
+    if (msg->encoding != "bgr8" && msg->encoding != "rgb8") {
+        throw std::runtime_error("仅支持 bgr8/rgb8 图像编码，当前收到: " + msg->encoding);
+    }
+
+    const int type = CV_8UC3;
+    cv::Mat wrapped(static_cast<int>(msg->height),
+                    static_cast<int>(msg->width),
+                    type,
+                    const_cast<unsigned char*>(msg->data.data()),
+                    static_cast<size_t>(msg->step));
+
+    cv::Mat image = wrapped.clone();
+    if (msg->encoding == "rgb8") {
+        cv::cvtColor(image, image, cv::COLOR_RGB2BGR);
+    }
+    return image;
 }
 
-int main(int argc, char** argv) {
-    const std::string config_path = (argc > 1) ? argv[1] : "./src/my_simulation/config/stereo_config.yaml";
-    const std::string model_path = (argc > 2) ? argv[2] : "./src/my_simulation/weights/best.onnx";
-    const std::string data_dir = (argc > 3) ? argv[3] : "./data_multi_test";
-    const std::string result_dir = (argc > 4) ? argv[4] : "./result_multi_ball_final";
-    const double tennis_ball_diameter_mm = 67.0;
+sensor_msgs::ImagePtr bgrToImageMsg(const cv::Mat& image,
+                                    const std_msgs::Header& header,
+                                    const std::string& encoding = "bgr8") {
+    sensor_msgs::ImagePtr msg(new sensor_msgs::Image());
+    msg->header = header;
+    msg->height = static_cast<uint32_t>(image.rows);
+    msg->width = static_cast<uint32_t>(image.cols);
+    msg->encoding = encoding;
+    msg->is_bigendian = false;
+    msg->step = static_cast<sensor_msgs::Image::_step_type>(image.cols * image.elemSize());
 
-    try {
-        if (!ensureDirectory(result_dir)) {
-            std::cerr << "❌ 无法创建结果目录: " << result_dir << std::endl;
-            return -1;
-        }
-        std::cout << "📁 终极融合版结果存放目录已就绪: " << result_dir << std::endl;
+    const std::size_t data_size = msg->step * image.rows;
+    msg->data.resize(data_size);
+    std::memcpy(msg->data.data(), image.data, data_size);
+    return msg;
+}
 
-        std::cout << "⏳ 正在加载双目参数和 YOLO ONNX 模型..." << std::endl;
-        StereoParameters params = loadStereoParameters(config_path);
+class StereoVisionNode {
+public:
+    StereoVisionNode()
+        : nh_(),
+          pnh_("~"),
+          it_(nh_) {
+        loadParameters();
+        params_ = loadStereoParameters(config_path_);
 
-        cv::dnn::Net net;
         try {
-            net = cv::dnn::readNetFromONNX(model_path);
+            net_ = cv::dnn::readNetFromONNX(model_path_);
         } catch (const cv::Exception& e) {
-            std::cerr << "❌ ONNX 模型加载失败: " << e.what() << std::endl;
-            std::cerr << "当前环境 OpenCV " << CV_VERSION
-                      << " 可能无法解析该 ONNX；若仍失败，优先尝试升级 OpenCV 或重新导出较低 opset 的 ONNX。"
-                      << std::endl;
-            return -1;
+            throw std::runtime_error(std::string("ONNX 模型加载失败: ") + e.what());
         }
 
-        if (net.empty()) {
-            std::cerr << "❌ ONNX 模型加载失败: " << model_path << std::endl;
-            return -1;
+        if (net_.empty()) {
+            throw std::runtime_error("ONNX 模型加载失败: " + model_path_);
         }
 
-        std::vector<cv::String> left_images;
-        std::vector<cv::String> right_images;
-        cv::glob(data_dir + "/left_*.jpg", left_images, false);
-        cv::glob(data_dir + "/right_*.jpg", right_images, false);
-        std::sort(left_images.begin(), left_images.end());
-        std::sort(right_images.begin(), right_images.end());
+        left_sub_ = it_.subscribe(left_topic_, 1, &StereoVisionNode::leftImageCallback, this);
+        right_sub_ = it_.subscribe(right_topic_, 1, &StereoVisionNode::rightImageCallback, this);
 
-        if (left_images.empty() || right_images.empty()) {
-            std::cerr << "❌ 未在 " << data_dir << " 目录下找到测试图像！" << std::endl;
-            return -1;
+        left_rect_pub_ = it_.advertise("stereo/left_rectified", 1);
+        right_rect_pub_ = it_.advertise("stereo/right_rectified", 1);
+        debug_pub_ = it_.advertise("stereo/debug_image", 1);
+        pose_pub_ = nh_.advertise<geometry_msgs::PoseArray>("stereo/ball_positions", 1);
+
+        ROS_INFO("stereo_node started. left_topic=%s right_topic=%s model=%s config=%s",
+                 left_topic_.c_str(), right_topic_.c_str(), model_path_.c_str(), config_path_.c_str());
+    }
+
+private:
+    void loadParameters() {
+        pnh_.param<std::string>("config_path", config_path_, "/home/lmy/catkin_ws/src/my_simulation/config/stereo_config.yaml");
+        pnh_.param<std::string>("model_path", model_path_, "/home/lmy/catkin_ws/src/my_simulation/weights/best.onnx");
+        pnh_.param<std::string>("left_topic", left_topic_, "/stereo_camera/left/image_raw");
+        pnh_.param<std::string>("right_topic", right_topic_, "/stereo_camera/right/image_raw");
+        pnh_.param<std::string>("output_frame", output_frame_, "camera_link");
+        pnh_.param("sync_tolerance_sec", sync_tolerance_sec_, 0.10);
+        pnh_.param("conf_threshold", conf_threshold_, 0.25f);
+        pnh_.param("nms_threshold", nms_threshold_, 0.45f);
+        pnh_.param("tennis_ball_diameter_mm", tennis_ball_diameter_mm_, 67.0);
+    }
+
+    void initializeRectificationIfNeeded(const cv::Size& img_size) {
+        if (maps_ready_ && img_size == image_size_) {
+            return;
         }
 
-        if (left_images.size() != right_images.size()) {
-            std::cerr << "⚠️ 左右图数量不一致，将按最小数量进行处理。" << std::endl;
+        image_size_ = img_size;
+        cv::stereoRectify(params_.M1, params_.d1, params_.M2, params_.d2, image_size_,
+                          params_.R, params_.T, R1_, R2_, P1_, P2_, Q_, cv::CALIB_ZERO_DISPARITY, 0);
+
+        focal_length_ = P1_.at<double>(0, 0);
+        cx_left_ = P1_.at<double>(0, 2);
+        baseline_ = std::abs(params_.T.at<double>(0, 0));
+
+        cv::initUndistortRectifyMap(params_.M1, params_.d1, R1_, P1_, image_size_, CV_32FC1, map1x_, map1y_);
+        cv::initUndistortRectifyMap(params_.M2, params_.d2, R2_, P2_, image_size_, CV_32FC1, map2x_, map2y_);
+        maps_ready_ = true;
+
+        ROS_INFO("Rectification maps ready. image_size=%dx%d focal=%.3f baseline=%.3fmm",
+                 image_size_.width, image_size_.height, focal_length_, baseline_);
+    }
+
+    void leftImageCallback(const sensor_msgs::ImageConstPtr& msg) {
+        latest_left_msg_ = msg;
+        tryProcessPair();
+    }
+
+    void rightImageCallback(const sensor_msgs::ImageConstPtr& msg) {
+        latest_right_msg_ = msg;
+        tryProcessPair();
+    }
+
+    void tryProcessPair() {
+        if (!latest_left_msg_ || !latest_right_msg_) {
+            return;
         }
 
-        cv::Mat first_left = cv::imread(left_images.front());
-        if (first_left.empty()) {
-            std::cerr << "❌ 无法读取首张左图: " << left_images.front() << std::endl;
-            return -1;
+        const double dt = std::abs((latest_left_msg_->header.stamp - latest_right_msg_->header.stamp).toSec());
+        if (dt > sync_tolerance_sec_) {
+            return;
         }
 
-        const cv::Size img_size = first_left.size();
-        cv::Mat R1, R2, P1, P2, Q;
-        cv::stereoRectify(params.M1, params.d1, params.M2, params.d2, img_size,
-                          params.R, params.T, R1, R2, P1, P2, Q, cv::CALIB_ZERO_DISPARITY, 0);
+        sensor_msgs::ImageConstPtr left_msg = latest_left_msg_;
+        sensor_msgs::ImageConstPtr right_msg = latest_right_msg_;
+        latest_left_msg_.reset();
+        latest_right_msg_.reset();
+        processStereoPair(left_msg, right_msg);
+    }
 
-        const double focal_length = P1.at<double>(0, 0);
-        const double cx_left = P1.at<double>(0, 2);
-        const double baseline = std::abs(params.T.at<double>(0, 0));
+    void processStereoPair(const sensor_msgs::ImageConstPtr& left_msg,
+                           const sensor_msgs::ImageConstPtr& right_msg) {
+        cv::Mat left_image;
+        cv::Mat right_image;
 
-        cv::Mat map1x, map1y, map2x, map2y;
-        cv::initUndistortRectifyMap(params.M1, params.d1, R1, P1, img_size, CV_32FC1, map1x, map1y);
-        cv::initUndistortRectifyMap(params.M2, params.d2, R2, P2, img_size, CV_32FC1, map2x, map2y);
+        try {
+            left_image = imageMsgToBgr(left_msg);
+            right_image = imageMsgToBgr(right_msg);
+        } catch (const std::exception& e) {
+            ROS_ERROR_THROTTLE(1.0, "image conversion failed: %s", e.what());
+            return;
+        }
 
-        printTableHeader();
+        initializeRectificationIfNeeded(left_image.size());
 
-        const std::size_t num_pairs = std::min(left_images.size(), right_images.size());
-        for (std::size_t idx = 0; idx < num_pairs; ++idx) {
-            const std::string left_path = left_images[idx];
-            const std::string right_path = right_images[idx];
-            const std::string filename = fileNameOf(left_path);
+        cv::Mat rectified_l, rectified_r;
+        cv::remap(left_image, rectified_l, map1x_, map1y_, cv::INTER_LINEAR);
+        cv::remap(right_image, rectified_r, map2x_, map2y_, cv::INTER_LINEAR);
 
-            cv::Mat img_l = cv::imread(left_path);
-            cv::Mat img_r = cv::imread(right_path);
-            if (img_l.empty() || img_r.empty()) {
+        std::vector<BoundingBox> boxes_l = detectObjects(rectified_l, net_, conf_threshold_, nms_threshold_);
+        std::vector<BoundingBox> boxes_r = detectObjects(rectified_r, net_, conf_threshold_, nms_threshold_);
+        std::vector<std::pair<BoundingBox, BoundingBox>> matched_pairs = matchBoundingBoxes(boxes_l, boxes_r);
+
+        cv::Mat combined_display;
+        cv::hconcat(rectified_l, rectified_r, combined_display);
+        const int img_width = rectified_l.cols;
+
+        geometry_msgs::PoseArray pose_array;
+        pose_array.header.stamp = left_msg->header.stamp;
+        pose_array.header.frame_id = output_frame_;
+
+        for (const auto& pair : matched_pairs) {
+            const BoundingBox& bl = pair.first;
+            const BoundingBox& br = pair.second;
+
+            const double disparity = bl.cx - br.cx;
+            if (disparity <= 0.0) {
                 continue;
             }
 
-            cv::Mat rectified_l, rectified_r;
-            cv::remap(img_l, rectified_l, map1x, map1y, cv::INTER_LINEAR);
-            cv::remap(img_r, rectified_r, map2x, map2y, cv::INTER_LINEAR);
+            const double w_pixel = bl.rect.width;
+            const double h_pixel = bl.rect.height;
+            const double raw_depth_mm = (focal_length_ * baseline_) / disparity;
+            const double size_pixel = (w_pixel + h_pixel) / 2.0;
+            const double z_geom_mm = (size_pixel > 0.0)
+                ? (focal_length_ * tennis_ball_diameter_mm_) / size_pixel
+                : raw_depth_mm;
 
-            std::vector<BoundingBox> boxes_l = detectObjects(rectified_l, net);
-            std::vector<BoundingBox> boxes_r = detectObjects(rectified_r, net);
+            const double z_fusion_mm = (raw_depth_mm < 1000.0)
+                ? (0.5 * raw_depth_mm + 0.5 * z_geom_mm)
+                : (0.3 * raw_depth_mm + 0.7 * z_geom_mm);
 
-            if (boxes_l.empty()) {
-                std::cout << "| " << std::left << std::setw(13) << filename
-                          << " | " << std::setw(16) << "未检测到目标"
-                          << " | " << std::setw(14) << "-"
-                          << " | " << std::setw(16) << "-"
-                          << " | " << std::setw(15) << "-"
-                          << " |\n";
-            }
+            const double raw_x_offset_left_cam_mm = (bl.cx - cx_left_) * z_fusion_mm / focal_length_;
+            const double raw_x_offset_center_mm = raw_x_offset_left_cam_mm - (baseline_ / 2.0);
 
-            cv::Mat combined_display;
-            cv::hconcat(rectified_l, rectified_r, combined_display);
-            const int img_width = rectified_l.cols;
+            const double z_fusion_cm = z_fusion_mm / 10.0;
+            const double raw_x_offset_cm = raw_x_offset_center_mm / 10.0;
+            const std::pair<double, double> compensated = compensateCoordinates(z_fusion_cm, raw_x_offset_cm);
 
-            std::vector<std::pair<BoundingBox, BoundingBox>> matched_pairs = matchBoundingBoxes(boxes_l, boxes_r);
+            const std::string label = bl.class_name + " | Z:" +
+                cv::format("%.1f", compensated.first) + "cm X:" +
+                cv::format("%+.1f", compensated.second) + "cm";
 
-            for (const auto& pair : matched_pairs) {
-                const BoundingBox& bl = pair.first;
-                const BoundingBox& br = pair.second;
+            cv::rectangle(combined_display, bl.rect, cv::Scalar(0, 255, 0), 2);
+            cv::putText(combined_display, label,
+                        cv::Point(bl.rect.x, std::max(20, bl.rect.y - 10)),
+                        cv::FONT_HERSHEY_SIMPLEX, 0.55, cv::Scalar(0, 255, 0), 2);
 
-                const double disparity = bl.cx - br.cx;
-                const double w_pixel = bl.rect.width;
-                const double h_pixel = bl.rect.height;
-                const double raw_depth_mm = (focal_length * baseline) / disparity;
+            cv::Rect right_rect = br.rect;
+            right_rect.x += img_width;
+            cv::rectangle(combined_display, right_rect, cv::Scalar(255, 0, 0), 2);
+            cv::line(combined_display,
+                     cv::Point(static_cast<int>(bl.cx), static_cast<int>(bl.cy)),
+                     cv::Point(static_cast<int>(br.cx) + img_width, static_cast<int>(br.cy)),
+                     cv::Scalar(0, 255, 255), 2);
 
-                const double size_pixel = (w_pixel + h_pixel) / 2.0;
-                const double z_geom_mm = (size_pixel > 0.0)
-                    ? (focal_length * tennis_ball_diameter_mm) / size_pixel
-                    : raw_depth_mm;
-
-                const double z_fusion_mm = (raw_depth_mm < 1000.0)
-                    ? (0.5 * raw_depth_mm + 0.5 * z_geom_mm)
-                    : (0.3 * raw_depth_mm + 0.7 * z_geom_mm);
-
-                const double raw_x_offset_left_cam_mm = (bl.cx - cx_left) * z_fusion_mm / focal_length;
-                const double raw_x_offset_center_mm = raw_x_offset_left_cam_mm - (baseline / 2.0);
-
-                const double z_fusion_cm = z_fusion_mm / 10.0;
-                const double raw_x_offset_cm = raw_x_offset_center_mm / 10.0;
-                const std::pair<double, double> compensated = compensateCoordinates(z_fusion_cm, raw_x_offset_cm);
-
-                const std::string direction = (compensated.second < 0.0) ? "左" : "右";
-                std::cout << "| " << std::left << std::setw(13) << filename
-                          << " | " << std::setw(16) << bl.class_name
-                          << " | " << std::setw(14) << std::fixed << std::setprecision(1) << (raw_depth_mm / 10.0)
-                          << " | " << std::setw(16) << compensated.first
-                          << " | 偏" << direction << " " << std::setw(12) << std::abs(compensated.second)
-                          << " |\n";
-
-                const std::string label = bl.class_name + " | Z:" +
-                    cv::format("%.1f", compensated.first) + "cm X:" +
-                    cv::format("%+.1f", compensated.second) + "cm";
-
-                cv::rectangle(combined_display, bl.rect, cv::Scalar(0, 255, 0), 2);
-                cv::putText(combined_display, label,
-                            cv::Point(bl.rect.x, std::max(20, bl.rect.y - 10)),
-                            cv::FONT_HERSHEY_SIMPLEX, 0.6, cv::Scalar(0, 255, 0), 2);
-
-                cv::Rect right_rect = br.rect;
-                right_rect.x += img_width;
-                cv::rectangle(combined_display, right_rect, cv::Scalar(255, 0, 0), 2);
-
-                cv::line(combined_display,
-                         cv::Point(static_cast<int>(bl.cx), static_cast<int>(bl.cy)),
-                         cv::Point(static_cast<int>(br.cx) + img_width, static_cast<int>(br.cy)),
-                         cv::Scalar(0, 255, 255), 2);
-            }
-
-            std::vector<cv::Rect> matched_left_rects;
-            matched_left_rects.reserve(matched_pairs.size());
-            for (const auto& pair : matched_pairs) {
-                matched_left_rects.push_back(pair.first.rect);
-            }
-
-            for (const auto& bl : boxes_l) {
-                const bool is_matched = std::find(matched_left_rects.begin(),
-                                                  matched_left_rects.end(),
-                                                  bl.rect) != matched_left_rects.end();
-                if (is_matched) {
-                    continue;
-                }
-
-                std::cout << "| " << std::left << std::setw(13) << filename
-                          << " | " << std::setw(16) << bl.class_name
-                          << " | " << std::setw(14) << "匹配失败"
-                          << " | " << std::setw(16) << "-"
-                          << " | " << std::setw(15) << "-"
-                          << " |\n";
-
-                cv::rectangle(combined_display, bl.rect, cv::Scalar(0, 0, 255), 2);
-                cv::putText(combined_display, "Unmatched",
-                            cv::Point(bl.rect.x, std::max(20, bl.rect.y - 10)),
-                            cv::FONT_HERSHEY_SIMPLEX, 0.6, cv::Scalar(0, 0, 255), 2);
-            }
-
-            const std::string save_path = result_dir + "/res_" + filename;
-            cv::imwrite(save_path, combined_display);
+            geometry_msgs::Pose pose;
+            pose.position.x = compensated.first / 100.0;
+            pose.position.y = -compensated.second / 100.0;
+            pose.position.z = 0.033;
+            pose.orientation.w = 1.0;
+            pose_array.poses.push_back(pose);
         }
 
-        std::cout << std::string(95, '=') << "\n";
-        std::cout << "✅ 处理完毕！所有包含【完整连线】与【终极融合坐标】的图已保存至 "
-                  << result_dir << "。" << std::endl;
+        publishImage(left_rect_pub_, rectified_l, left_msg->header, "bgr8");
+        publishImage(right_rect_pub_, rectified_r, right_msg->header, "bgr8");
+        publishImage(debug_pub_, combined_display, left_msg->header, "bgr8");
+        pose_pub_.publish(pose_array);
+
+        ROS_INFO_THROTTLE(1.0, "stereo_node detections=%zu matches=%zu",
+                          boxes_l.size(), matched_pairs.size());
+    }
+
+    void publishImage(image_transport::Publisher& publisher,
+                      const cv::Mat& image,
+                      const std_msgs::Header& header,
+                      const std::string& encoding) {
+        publisher.publish(bgrToImageMsg(image, header, encoding));
+    }
+
+    ros::NodeHandle nh_;
+    ros::NodeHandle pnh_;
+    image_transport::ImageTransport it_;
+    image_transport::Subscriber left_sub_;
+    image_transport::Subscriber right_sub_;
+    image_transport::Publisher left_rect_pub_;
+    image_transport::Publisher right_rect_pub_;
+    image_transport::Publisher debug_pub_;
+    ros::Publisher pose_pub_;
+
+    sensor_msgs::ImageConstPtr latest_left_msg_;
+    sensor_msgs::ImageConstPtr latest_right_msg_;
+
+    StereoParameters params_;
+    cv::dnn::Net net_;
+
+    std::string config_path_;
+    std::string model_path_;
+    std::string left_topic_;
+    std::string right_topic_;
+    std::string output_frame_;
+    double sync_tolerance_sec_ = 0.10;
+    float conf_threshold_ = 0.25f;
+    float nms_threshold_ = 0.45f;
+    double tennis_ball_diameter_mm_ = 67.0;
+
+    bool maps_ready_ = false;
+    cv::Size image_size_;
+    cv::Mat R1_, R2_, P1_, P2_, Q_;
+    cv::Mat map1x_, map1y_, map2x_, map2y_;
+    double focal_length_ = 0.0;
+    double cx_left_ = 0.0;
+    double baseline_ = 0.0;
+};
+
+int main(int argc, char** argv) {
+    ros::init(argc, argv, "stereo_node");
+
+    try {
+        StereoVisionNode node;
+        ros::spin();
     } catch (const std::exception& e) {
-        std::cerr << "❌ 程序运行失败: " << e.what() << std::endl;
+        ROS_FATAL("stereo_node startup failed: %s", e.what());
         return -1;
     }
 
