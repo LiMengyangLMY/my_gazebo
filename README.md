@@ -102,8 +102,15 @@ catkin_ws/
     └── my_simulation/
         ├── config/
         │   └── stereo_config.yaml
+        ├── models_and_worlds/
+        │   ├── simple_car.urdf
+        │   ├── spawn_car.launch
+        │   └── tennis_court.world
+        ├── scripts/
+        │   └── run_sim_with_views_and_screen_record.sh
         ├── src/
-        │   └── stereo_vision_localization.cpp
+        │   ├── stereo_vision_localization.cpp
+        │   └── ball_pickup_controller.cpp
         └── weights/
             └── best.onnx
 ```
@@ -221,49 +228,121 @@ g++ -std=c++14 src/my_simulation/src/stereo_vision_localization.cpp \
 
 ## 当前实现说明
 
-当前版本是离线批处理程序，不是完整 ROS 话题节点。
+当前工程已经包含两条可直接运行的链路：
 
-当前入口函数做的是：
+### 1. 离线双目识别定位验证
 
-- 从磁盘读取测试图像
+用于验证 `stereo_vision_localization.cpp` 的检测、匹配、深度融合与补偿逻辑：
+
+- 从磁盘读取左右测试图像
 - 批量处理整个测试集
-- 将结果保存到指定目录
+- 保存带检测框、连线和坐标标签的结果图
 
-还没有做的部分包括：
+### 2. Gazebo + ROS 实时仿真演示
 
-- 订阅 ROS 图像话题
-- 实时接收单 USB 双目拼接画面
-- 发布检测结果或三维坐标消息
+用于完成网球拾取演示、录制展示视频和导出实验结果：
 
-## 后续 ROS 集成建议
+- Gazebo 载入网球场、小车、双目相机和网球模型
+- `stereo_node` 实时订阅 `/stereo_camera/left/image_raw` 与 `/stereo_camera/right/image_raw`
+- `ball_pickup_controller` 负责最近可达球优先的拾取控制
+- 左右视图使用 `image_view` 打开
+- 支持交互式整屏录制
+- 一次实验结束后自动导出视频、路径图和指标文档
 
-如果后续要集成到 ROS，建议按下面的方向改造：
+需要注意：
 
-- 用 `cv_bridge` 替换当前 `cv::imread` 批处理入口
-- 如果输入是单 USB 双目拼接图像，先按中线切分左右图
-- 将离线批量处理改成单帧回调处理
-- 视需要发布目标坐标、调试图像和检测框信息
+- 当前控制闭环主要基于 Gazebo 中的模型真值，视觉节点用于实时展示识别与定位结果
+- 这样做的目的是保证当前阶段的演示稳定性，便于对比传统策略与改进策略的拾球时间
 
-示例切分逻辑：
+## ROS 仿真运行
 
-```cpp
-cv::Mat raw_img;
-int half_width = raw_img.cols / 2;
-cv::Mat img_l = raw_img(cv::Rect(0, 0, half_width, raw_img.rows));
-cv::Mat img_r = raw_img(cv::Rect(half_width, 0, half_width, raw_img.rows));
+如果只想直接启动仿真：
+
+```bash
+cd /home/lmy/catkin_ws
+source /opt/ros/noetic/setup.bash
+source /home/lmy/catkin_ws/devel/setup.bash
+roslaunch my_simulation spawn_car.launch
 ```
+
+如果只想手动查看左右相机视图：
+
+```bash
+rosrun image_view image_view image:=/stereo_camera/left/image_raw _autosize:=true _window_name:=left_camera_window
+rosrun image_view image_view image:=/stereo_camera/right/image_raw _autosize:=true _window_name:=right_camera_window
+```
+
+## 交互式演示与录屏
+
+推荐使用下面的脚本完成演示：
+
+```bash
+cd /home/lmy/catkin_ws
+./src/my_simulation/scripts/run_sim_with_views_and_screen_record.sh
+```
+
+也可以自定义本次实验输出目录名：
+
+```bash
+cd /home/lmy/catkin_ws
+./src/my_simulation/scripts/run_sim_with_views_and_screen_record.sh exp_case_1
+```
+
+脚本流程如下：
+
+- 启动 Gazebo 仿真
+- 打开左目和右目视图窗口
+- 小车保持等待，不会提前开始捡球
+- 你手动摆好 Gazebo 和左右视图窗口
+- 按一次回车后，脚本先倒计时 `5s`
+- 倒计时结束时同时开始整屏录制和小车捡球
+- 按 `Ctrl+C` 结束实验并自动导出结果
+
+## 实验结果输出
+
+每次运行脚本后，都会在 `/mnt/hgfs/sharedFolder/` 下生成一个独立结果文件夹，例如：
+
+```text
+/mnt/hgfs/sharedFolder/exp_case_1/
+```
+
+该目录中包含：
+
+- `screen.mp4`
+  整个桌面的演示视频
+- `path.csv`
+  机器人平面路径采样数据
+- `path.svg`
+  机器人拾球平面路径图
+- `metrics.md`
+  拾球时间和实验指标汇总文档
+
+### `metrics.md` 中包含的主要指标
+
+- 总拾球时间
+- 总行驶距离
+- 平均路径速度
+- 是否完成全部拾取
+- 起点和终点位姿
+- 每个球的初始位置
+- 每个球的拾取顺序
+- 每个球的拾取时间
 
 ## 当前已验证状态
 
-截至当前版本，离线流程已经验证通过：
+截至当前版本，以下内容已经验证通过：
 
 - 标定文件可以正常加载
 - ONNX 模型可在 OpenCV `4.10.0` 下正常加载
 - `data_multi_test` 中 4 组左右图可完整跑通
-- 程序可输出检测结果、融合坐标和可视化图像
+- Gazebo 双目相机话题可正常发布
+- 左右视图可通过 `image_view` 正常显示
+- 交互式脚本可完成倒计时后同时开始录屏和捡球
+- 实验结束后可自动导出 `screen.mp4`、`path.csv`、`path.svg`、`metrics.md`
 
-需要继续验证的部分：
+仍建议继续验证的部分：
 
 - 不同距离下的真实测距误差
-- 左右匹配是否在复杂遮挡场景下稳定
+- 左右匹配在复杂遮挡场景下的稳定性
 - 补偿模型在新数据集上的泛化效果
+- 传统点目标策略与改进线段目标策略的多轮时间统计对比

@@ -2,6 +2,7 @@
   <arg name="paused" default="false"/>
   <arg name="wait_for_manual_start" default="false"/>
   <arg name="startup_delay_sec" default="0.0"/>
+  <arg name="artifacts_output_dir" default=""/>
 
   <!-- 1. 加载 URDF 机器人模型 -->
   <param name="robot_description" command="cat /home/lmy/catkin_ws/src/my_simulation/models_and_worlds/simple_car.urdf"/>
@@ -42,6 +43,7 @@
     <param name="depth_error_margin" value="0.0356"/>
     <param name="startup_delay_sec" value="$(arg startup_delay_sec)"/>
     <param name="wait_for_manual_start" value="$(arg wait_for_manual_start)"/>
+    <param name="artifacts_output_dir" value="$(arg artifacts_output_dir)"/>
     <rosparam param="ball_names">[tennis_ball_1, tennis_ball_2, tennis_ball_3, tennis_ball_4]</rosparam>
   </node>
 </launch>

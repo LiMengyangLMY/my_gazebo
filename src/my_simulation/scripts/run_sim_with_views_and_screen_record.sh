@@ -19,12 +19,17 @@ mkdir -p "${EXPORT_DIR}"
 
 TIMESTAMP="$(date +%Y%m%d_%H%M%S)"
 OUTPUT_PREFIX="${1:-tennis_pickup_screen_${TIMESTAMP}}"
-RAW_FILE="${LOCAL_RECORD_DIR}/${OUTPUT_PREFIX}_screen.mkv"
-FINAL_FILE="${EXPORT_DIR}/${OUTPUT_PREFIX}_screen.mp4"
-RECORD_LOG_FILE="${LOCAL_RECORD_DIR}/${OUTPUT_PREFIX}_screen_record.log"
+SESSION_LOCAL_DIR="${LOCAL_RECORD_DIR}/${OUTPUT_PREFIX}"
+SESSION_EXPORT_DIR="${EXPORT_DIR}/${OUTPUT_PREFIX}"
+RAW_FILE="${SESSION_LOCAL_DIR}/screen.mkv"
+FINAL_FILE="${SESSION_EXPORT_DIR}/screen.mp4"
+RECORD_LOG_FILE="${SESSION_LOCAL_DIR}/screen_record.log"
 
 source "${ROS_SETUP}"
 source "${CATKIN_SETUP}"
+
+mkdir -p "${SESSION_LOCAL_DIR}"
+mkdir -p "${SESSION_EXPORT_DIR}"
 
 if ! command -v ffmpeg >/dev/null 2>&1; then
   echo "ffmpeg 未安装，无法录屏。"
@@ -239,9 +244,9 @@ export_video_if_valid() {
     -i "${RAW_FILE}" \
     -c copy \
     -movflags +faststart \
-    "${FINAL_FILE}" >/tmp/"${OUTPUT_PREFIX}_screen_remux.log" 2>&1 || {
+    "${FINAL_FILE}" >"${SESSION_LOCAL_DIR}/screen_remux.log" 2>&1 || {
       echo "导出 mp4 失败: ${FINAL_FILE}" >&2
-      cat /tmp/"${OUTPUT_PREFIX}_screen_remux.log" >&2 || true
+      cat "${SESSION_LOCAL_DIR}/screen_remux.log" >&2 || true
       return
     }
 
@@ -267,7 +272,8 @@ echo "启动 Gazebo 仿真（先暂停物理引擎）..."
 roslaunch my_simulation spawn_car.launch \
   paused:=false \
   wait_for_manual_start:=true \
-  startup_delay_sec:=0.0 &
+  startup_delay_sec:=0.0 \
+  artifacts_output_dir:="${SESSION_EXPORT_DIR}" &
 ROS_PIDS+=($!)
 
 echo "等待仿真节点与双目话题就绪..."
@@ -305,7 +311,7 @@ echo "发送开始捡球信号。"
 call_trigger_rosservice "/ball_pickup_controller/start"
 
 echo "录屏已开始，小车已开始捡球。按 Ctrl+C 可停止并自动导出 mp4。"
-echo "导出目录: ${EXPORT_DIR}"
+echo "结果目录: ${SESSION_EXPORT_DIR}"
 echo "输出文件前缀: ${OUTPUT_PREFIX}"
 
 wait

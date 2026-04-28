@@ -1,8 +1,12 @@
 #include <algorithm>
 #include <cmath>
+#include <fstream>
+#include <iomanip>
 #include <limits>
 #include <map>
+#include <sstream>
 #include <string>
+#include <utility>
 #include <vector>
 
 #include <geometry_msgs/Twist.h>
@@ -18,6 +22,18 @@ struct BallInfo {
     bool visible = false;
     bool picked = false;
     ros::Time last_seen;
+    bool initial_recorded = false;
+    double initial_x = 0.0;
+    double initial_y = 0.0;
+    double pickup_time_sec = -1.0;
+    int pickup_order = 0;
+};
+
+struct PathSample {
+    double sim_time_sec = 0.0;
+    double x = 0.0;
+    double y = 0.0;
+    double yaw = 0.0;
 };
 
 class BallPickupController {
@@ -44,6 +60,11 @@ public:
         ROS_INFO("ball_pickup_controller started. strategy=%s, robot_model=%s, balls=%zu, wait_for_manual_start=%s",
                  strategy_.c_str(), robot_model_name_.c_str(), ball_names_.size(),
                  wait_for_manual_start_ ? "true" : "false");
+    }
+
+    ~BallPickupController() {
+        stopRobot();
+        exportArtifacts();
     }
 
 private:
@@ -81,6 +102,7 @@ private:
         pnh_.param("point_lateral_exit_tolerance", point_lateral_exit_tolerance_, 0.09);
         pnh_.param("startup_delay_sec", startup_delay_sec_, 0.0);
         pnh_.param("wait_for_manual_start", wait_for_manual_start_, false);
+        pnh_.param<std::string>("artifacts_output_dir", artifacts_output_dir_, "");
 
         if (!pnh_.getParam("ball_names", ball_names_)) {
             ball_names_ = {"tennis_ball_1", "tennis_ball_2", "tennis_ball_3", "tennis_ball_4"};
@@ -135,6 +157,11 @@ private:
                 it->second.world_y = latest_states_.pose[i].position.y;
                 it->second.visible = true;
                 it->second.last_seen = ros::Time::now();
+                if (!it->second.initial_recorded) {
+                    it->second.initial_recorded = true;
+                    it->second.initial_x = it->second.world_x;
+                    it->second.initial_y = it->second.world_y;
+                }
             }
         }
 
@@ -233,6 +260,9 @@ private:
         }
 
         it->second.picked = true;
+        it->second.pickup_time_sec = currentRunTimeSec();
+        it->second.pickup_order = static_cast<int>(picked_ball_count_ + 1);
+        ++picked_ball_count_;
         if (current_target_name_ == ball_name) {
             current_target_name_.clear();
             control_mode_ = ControlMode::ROTATE_ONLY;
@@ -270,6 +300,277 @@ private:
         response.message = "ball_pickup_controller start accepted";
         ROS_INFO("ball_pickup_controller received manual start request.");
         return true;
+    }
+
+    double currentRunTimeSec() const {
+        if (!run_started_ || run_start_time_.isZero()) {
+            return 0.0;
+        }
+        return std::max(0.0, (ros::Time::now() - run_start_time_).toSec());
+    }
+
+    void markRunStartedIfNeeded() {
+        if (!run_started_) {
+            run_started_ = true;
+            run_start_time_ = ros::Time::now();
+            ROS_INFO("ball_pickup_controller run started.");
+        }
+    }
+
+    void recordPathSample(double robot_x, double robot_y, double robot_yaw) {
+        markRunStartedIfNeeded();
+
+        PathSample sample;
+        sample.sim_time_sec = currentRunTimeSec();
+        sample.x = robot_x;
+        sample.y = robot_y;
+        sample.yaw = robot_yaw;
+
+        if (!path_samples_.empty()) {
+            const PathSample& last = path_samples_.back();
+            total_path_length_m_ += std::hypot(sample.x - last.x, sample.y - last.y);
+        }
+
+        path_samples_.push_back(sample);
+    }
+
+    void markRunFinishedIfNeeded() {
+        if (run_started_ && !run_finished_) {
+            run_finished_ = true;
+            run_end_time_ = ros::Time::now();
+        }
+    }
+
+    std::string formatDouble(double value, int precision = 3) const {
+        std::ostringstream oss;
+        oss << std::fixed << std::setprecision(precision) << value;
+        return oss.str();
+    }
+
+    std::pair<double, double> projectPoint(double x,
+                                           double y,
+                                           double min_x,
+                                           double max_x,
+                                           double min_y,
+                                           double max_y,
+                                           double width,
+                                           double height,
+                                           double margin) const {
+        const double usable_width = width - 2.0 * margin;
+        const double usable_height = height - 2.0 * margin;
+        const double x_norm = (x - min_x) / std::max(1e-6, max_x - min_x);
+        const double y_norm = (y - min_y) / std::max(1e-6, max_y - min_y);
+        const double px = margin + x_norm * usable_width;
+        const double py = height - (margin + y_norm * usable_height);
+        return {px, py};
+    }
+
+    void exportPathCsv() const {
+        const std::string csv_path = artifacts_output_dir_ + "/path.csv";
+        std::ofstream ofs(csv_path);
+        if (!ofs) {
+            ROS_WARN("Failed to write path csv: %s", csv_path.c_str());
+            return;
+        }
+
+        ofs << "sim_time_sec,x_m,y_m,yaw_rad\n";
+        for (const PathSample& sample : path_samples_) {
+            ofs << formatDouble(sample.sim_time_sec, 4) << ","
+                << formatDouble(sample.x, 4) << ","
+                << formatDouble(sample.y, 4) << ","
+                << formatDouble(sample.yaw, 4) << "\n";
+        }
+    }
+
+    void exportPathSvg() const {
+        if (path_samples_.empty()) {
+            return;
+        }
+
+        const std::string svg_path = artifacts_output_dir_ + "/path.svg";
+        std::ofstream ofs(svg_path);
+        if (!ofs) {
+            ROS_WARN("Failed to write path svg: %s", svg_path.c_str());
+            return;
+        }
+
+        constexpr double width = 1000.0;
+        constexpr double height = 700.0;
+        constexpr double margin = 70.0;
+
+        double min_x = path_samples_.front().x;
+        double max_x = path_samples_.front().x;
+        double min_y = path_samples_.front().y;
+        double max_y = path_samples_.front().y;
+
+        for (const PathSample& sample : path_samples_) {
+            min_x = std::min(min_x, sample.x);
+            max_x = std::max(max_x, sample.x);
+            min_y = std::min(min_y, sample.y);
+            max_y = std::max(max_y, sample.y);
+        }
+
+        for (const auto& entry : balls_) {
+            const BallInfo& ball = entry.second;
+            if (!ball.initial_recorded) {
+                continue;
+            }
+            min_x = std::min(min_x, ball.initial_x);
+            max_x = std::max(max_x, ball.initial_x);
+            min_y = std::min(min_y, ball.initial_y);
+            max_y = std::max(max_y, ball.initial_y);
+        }
+
+        min_x -= 0.5;
+        max_x += 0.5;
+        min_y -= 0.5;
+        max_y += 0.5;
+
+        if ((max_x - min_x) < 2.0) {
+            min_x -= 1.0;
+            max_x += 1.0;
+        }
+        if ((max_y - min_y) < 2.0) {
+            min_y -= 1.0;
+            max_y += 1.0;
+        }
+
+        ofs << "<svg xmlns=\"http://www.w3.org/2000/svg\" width=\"" << width
+            << "\" height=\"" << height << "\" viewBox=\"0 0 " << width << " " << height << "\">\n";
+        ofs << "  <rect x=\"0\" y=\"0\" width=\"" << width << "\" height=\"" << height
+            << "\" fill=\"#ffffff\"/>\n";
+        ofs << "  <rect x=\"" << margin << "\" y=\"" << margin << "\" width=\"" << (width - 2 * margin)
+            << "\" height=\"" << (height - 2 * margin) << "\" fill=\"#f8fbff\" stroke=\"#c8d4e3\" stroke-width=\"2\"/>\n";
+
+        for (int i = 0; i <= 5; ++i) {
+            const double gx = margin + i * (width - 2 * margin) / 5.0;
+            const double gy = margin + i * (height - 2 * margin) / 5.0;
+            ofs << "  <line x1=\"" << gx << "\" y1=\"" << margin << "\" x2=\"" << gx << "\" y2=\""
+                << (height - margin) << "\" stroke=\"#e6edf5\" stroke-width=\"1\"/>\n";
+            ofs << "  <line x1=\"" << margin << "\" y1=\"" << gy << "\" x2=\"" << (width - margin)
+                << "\" y2=\"" << gy << "\" stroke=\"#e6edf5\" stroke-width=\"1\"/>\n";
+        }
+
+        ofs << "  <polyline fill=\"none\" stroke=\"#1f77b4\" stroke-width=\"4\" points=\"";
+        for (const PathSample& sample : path_samples_) {
+            const auto pt = projectPoint(sample.x, sample.y, min_x, max_x, min_y, max_y, width, height, margin);
+            ofs << formatDouble(pt.first, 2) << "," << formatDouble(pt.second, 2) << " ";
+        }
+        ofs << "\"/>\n";
+
+        const auto start_pt = projectPoint(path_samples_.front().x, path_samples_.front().y,
+                                           min_x, max_x, min_y, max_y, width, height, margin);
+        const auto end_pt = projectPoint(path_samples_.back().x, path_samples_.back().y,
+                                         min_x, max_x, min_y, max_y, width, height, margin);
+        ofs << "  <circle cx=\"" << formatDouble(start_pt.first, 2) << "\" cy=\"" << formatDouble(start_pt.second, 2)
+            << "\" r=\"7\" fill=\"#2ca02c\"/>\n";
+        ofs << "  <circle cx=\"" << formatDouble(end_pt.first, 2) << "\" cy=\"" << formatDouble(end_pt.second, 2)
+            << "\" r=\"7\" fill=\"#d62728\"/>\n";
+        ofs << "  <text x=\"" << formatDouble(start_pt.first + 10, 2) << "\" y=\"" << formatDouble(start_pt.second - 10, 2)
+            << "\" font-size=\"18\" fill=\"#2ca02c\">start</text>\n";
+        ofs << "  <text x=\"" << formatDouble(end_pt.first + 10, 2) << "\" y=\"" << formatDouble(end_pt.second - 10, 2)
+            << "\" font-size=\"18\" fill=\"#d62728\">end</text>\n";
+
+        for (const auto& entry : balls_) {
+            const BallInfo& ball = entry.second;
+            if (!ball.initial_recorded) {
+                continue;
+            }
+            const auto pt = projectPoint(ball.initial_x, ball.initial_y, min_x, max_x, min_y, max_y, width, height, margin);
+            const std::string fill = ball.picked ? "#ffcc00" : "#888888";
+            ofs << "  <circle cx=\"" << formatDouble(pt.first, 2) << "\" cy=\"" << formatDouble(pt.second, 2)
+                << "\" r=\"8\" fill=\"" << fill << "\" stroke=\"#333333\" stroke-width=\"1.5\"/>\n";
+            std::ostringstream label;
+            label << ball.name;
+            if (ball.pickup_order > 0) {
+                label << " #" << ball.pickup_order;
+            }
+            ofs << "  <text x=\"" << formatDouble(pt.first + 12, 2) << "\" y=\"" << formatDouble(pt.second - 12, 2)
+                << "\" font-size=\"16\" fill=\"#333333\">" << label.str() << "</text>\n";
+        }
+
+        ofs << "  <text x=\"" << margin << "\" y=\"35\" font-size=\"24\" fill=\"#203040\">Robot pickup path (top view)</text>\n";
+        ofs << "  <text x=\"" << margin << "\" y=\"" << (height - 18)
+            << "\" font-size=\"16\" fill=\"#506070\">x range: " << formatDouble(min_x, 2) << " to "
+            << formatDouble(max_x, 2) << " m, y range: " << formatDouble(min_y, 2) << " to "
+            << formatDouble(max_y, 2) << " m</text>\n";
+        ofs << "</svg>\n";
+    }
+
+    void exportMetricsMarkdown() const {
+        const std::string metrics_path = artifacts_output_dir_ + "/metrics.md";
+        std::ofstream ofs(metrics_path);
+        if (!ofs) {
+            ROS_WARN("Failed to write metrics markdown: %s", metrics_path.c_str());
+            return;
+        }
+
+        const double duration_sec = run_started_
+            ? ((run_finished_ ? run_end_time_ : ros::Time::now()) - run_start_time_).toSec()
+            : 0.0;
+        const double avg_speed = (duration_sec > 1e-6) ? (total_path_length_m_ / duration_sec) : 0.0;
+        const bool all_picked = (picked_ball_count_ == ball_names_.size());
+
+        ofs << "# Pickup Experiment Summary\n\n";
+        ofs << "- Strategy: `" << strategy_ << "`\n";
+        ofs << "- Robot model: `" << robot_model_name_ << "`\n";
+        ofs << "- Balls configured: `" << ball_names_.size() << "`\n";
+        ofs << "- Balls picked: `" << picked_ball_count_ << "`\n";
+        ofs << "- Run completed all pickups: `" << (all_picked ? "yes" : "no") << "`\n";
+        ofs << "- Total pickup time (sim): `" << formatDouble(duration_sec, 3) << " s`\n";
+        ofs << "- Total traveled distance: `" << formatDouble(total_path_length_m_, 3) << " m`\n";
+        ofs << "- Average path speed: `" << formatDouble(avg_speed, 3) << " m/s`\n";
+        ofs << "- Path samples: `" << path_samples_.size() << "`\n\n";
+
+        if (!path_samples_.empty()) {
+            const PathSample& first = path_samples_.front();
+            const PathSample& last = path_samples_.back();
+            ofs << "## Robot Pose\n\n";
+            ofs << "- Start pose: `(" << formatDouble(first.x, 3) << ", " << formatDouble(first.y, 3)
+                << "), yaw=" << formatDouble(first.yaw, 3) << " rad`\n";
+            ofs << "- End pose: `(" << formatDouble(last.x, 3) << ", " << formatDouble(last.y, 3)
+                << "), yaw=" << formatDouble(last.yaw, 3) << " rad`\n\n";
+        }
+
+        ofs << "## Ball Pickup Timeline\n\n";
+        ofs << "| Ball | Initial position (m) | Picked | Pickup order | Pickup time (s) |\n";
+        ofs << "| --- | --- | --- | --- | --- |\n";
+        for (const std::string& ball_name : ball_names_) {
+            const BallInfo& ball = balls_.at(ball_name);
+            std::ostringstream pos;
+            if (ball.initial_recorded) {
+                pos << "(" << formatDouble(ball.initial_x, 3) << ", " << formatDouble(ball.initial_y, 3) << ")";
+            } else {
+                pos << "n/a";
+            }
+            ofs << "| `" << ball.name << "` | " << pos.str()
+                << " | " << (ball.picked ? "yes" : "no")
+                << " | " << (ball.pickup_order > 0 ? std::to_string(ball.pickup_order) : "-")
+                << " | " << (ball.pickup_time_sec >= 0.0 ? formatDouble(ball.pickup_time_sec, 3) : "-")
+                << " |\n";
+        }
+
+        ofs << "\n## Generated Files\n\n";
+        ofs << "- `screen.mp4`\n";
+        ofs << "- `path.csv`\n";
+        ofs << "- `path.svg`\n";
+        ofs << "- `metrics.md`\n";
+    }
+
+    void exportArtifacts() {
+        if (artifacts_written_ || artifacts_output_dir_.empty() || !run_started_) {
+            return;
+        }
+
+        if (!run_finished_) {
+            run_end_time_ = ros::Time::now();
+        }
+
+        exportPathCsv();
+        exportPathSvg();
+        exportMetricsMarkdown();
+        artifacts_written_ = true;
+        ROS_INFO("ball_pickup_controller exported artifacts to %s", artifacts_output_dir_.c_str());
     }
 
     const char* controlModeName() const {
@@ -378,11 +679,14 @@ private:
             return;
         }
 
+        recordPathSample(robot_x, robot_y, robot_yaw);
+
         std::string target_name;
         if (!selectTargetWithLock(robot_x, robot_y, target_name)) {
             stopRobot();
             current_target_name_.clear();
             control_mode_ = ControlMode::ROTATE_ONLY;
+            markRunFinishedIfNeeded();
             ROS_INFO_THROTTLE(2.0, "All balls picked or no visible targets left.");
             return;
         }
@@ -451,6 +755,15 @@ private:
     double startup_delay_sec_ = 0.0;
     bool wait_for_manual_start_ = false;
     bool manual_start_requested_ = true;
+    std::string artifacts_output_dir_;
+    std::vector<PathSample> path_samples_;
+    double total_path_length_m_ = 0.0;
+    std::size_t picked_ball_count_ = 0;
+    bool run_started_ = false;
+    bool run_finished_ = false;
+    bool artifacts_written_ = false;
+    ros::Time run_start_time_;
+    ros::Time run_end_time_;
 
     std::string current_target_name_;
     ControlMode control_mode_ = ControlMode::ROTATE_ONLY;
