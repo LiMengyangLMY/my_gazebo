@@ -1,0 +1,47 @@
+ffmpeg version git-2026-04-19-de18feb Copyright (c) 2000-2026 the FFmpeg developers
+  built with gcc 9 (Ubuntu 9.4.0-1ubuntu1~20.04.2)
+  configuration: --enable-shared --enable-gpl --enable-libx264
+  libavutil      60. 30.100 / 60. 30.100
+  libavcodec     62. 30.100 / 62. 30.100
+  libavformat    62. 13.102 / 62. 13.102
+  libavdevice    62.  4.100 / 62.  4.100
+  libavfilter    11. 15.101 / 11. 15.101
+  libswscale      9.  7.100 /  9.  7.100
+  libswresample   6.  4.100 /  6.  4.100
+[in#0/x11grab @ 0x563302660c40] Stream #0: not enough frames to estimate rate; consider increasing probesize
+Input #0, x11grab, from ':0.0+0,0':
+  Duration: N/A, start: 1777444624.917586, bitrate: 3678192 kb/s
+  Stream #0:0: Video: rawvideo (BGR[0] / 0x524742), bgr0, 2870x1602, 3678192 kb/s, 25 fps, 1000k tbr, 1000k tbn, start 1777444624.917586
+Stream mapping:
+  Stream #0:0 -> #0:0 (rawvideo (native) -> h264 (libx264))
+[libx264 @ 0x56330266ef00] using cpu capabilities: MMX2 SSE2Fast SSSE3 SSE4.2 AVX FMA3 BMI2 AVX2
+[libx264 @ 0x56330266ef00] profile High, level 5.0
+[libx264 @ 0x56330266ef00] 264 - core 155 r2917 0a84d98 - H.264/MPEG-4 AVC codec - Copyleft 2003-2018 - http://www.videolan.org/x264.html - options: cabac=1 ref=1 deblock=1:0:0 analyse=0x3:0x113 me=hex subme=2 psy=1 psy_rd=1.00:0.00 mixed_ref=0 me_range=16 chroma_me=1 trellis=0 8x8dct=1 cqm=0 deadzone=21,11 fast_pskip=1 chroma_qp_offset=0 threads=6 lookahead_threads=2 sliced_threads=0 nr=0 decimate=1 interlaced=0 bluray_compat=0 constrained_intra=0 bframes=3 b_pyramid=2 b_adapt=1 b_bias=0 direct=1 weightb=1 open_gop=0 weightp=1 keyint=250 keyint_min=25 scenecut=40 intra_refresh=0 rc_lookahead=10 rc=crf mbtree=1 crf=23.0 qcomp=0.60 qpmin=0 qpmax=69 qpstep=4 ip_ratio=1.40 aq=1:1.00
+Output #0, matroska, to '/home/lmy/catkin_ws/recordings_tmp/exp_turncmp_point/screen.mkv':
+  Metadata:
+    encoder         : Lavf62.13.102
+  Stream #0:0: Video: h264 (H264 / 0x34363248), yuv420p(tv, progressive), 2870x1602, q=2-31, 25 fps, 1k tbn
+    Metadata:
+      encoder         : Lavc62.30.100 libx264
+    Side data:
+      CPB properties: bitrate max/min/avg: 0/0/0 buffer size: 0 vbv_delay: N/A
+frame=    0 fps=0.0 q=0.0 size=       0KiB time=N/A bitrate=N/A speed=N/A elapsed=0:00:00.50    frame=    1 fps=1.0 q=28.0 size=       1KiB time=-00:00:00.08 bitrate=N/A speed=N/A elapsed=0:00:01.00    frame=    6 fps=4.0 q=28.0 size=       1KiB time=00:00:00.20 bitrate=  23.8kbits/s speed=0.133x elapsed=0:00:01.50    frame=   13 fps=6.5 q=28.0 size=       1KiB time=00:00:00.48 bitrate=   9.9kbits/s dup=0 drop=2 speed=0.24x elapsed=0:00:02.00    frame=   20 fps=8.0 q=28.0 size=       1KiB time=00:00:00.76 bitrate=   6.3kbits/s dup=0 drop=3 speed=0.304x elapsed=0:00:02.50    [out#0/matroska @ 0x56330266d500] Error writing trailer: Immediate exit requested
+[out#0/matroska @ 0x56330266d500] Error closing file: Immediate exit requested
+[out#0/matroska @ 0x56330266d500] video:611KiB audio:0KiB subtitle:0KiB other streams:0KiB global headers:0KiB muxing overhead: 0.174037%
+frame=   63 fps= 18 q=-1.0 Lsize=     612KiB time=00:00:03.00 bitrate=1670.0kbits/s dup=0 drop=9 speed=0.859x elapsed=0:00:03.49    
+[libx264 @ 0x56330266ef00] frame I:1     Avg QP:13.68  size:103147
+[libx264 @ 0x56330266ef00] frame P:16    Avg QP:16.34  size: 27636
+[libx264 @ 0x56330266ef00] frame B:46    Avg QP:17.43  size:  1721
+[libx264 @ 0x56330266ef00] consecutive B-frames:  1.6%  0.0%  9.5% 88.9%
+[libx264 @ 0x56330266ef00] mb I  I16..4: 89.0%  2.0%  9.0%
+[libx264 @ 0x56330266ef00] mb P  I16..4:  2.5%  0.2%  1.6%  P16..4:  1.3%  0.5%  0.6%  0.0%  0.0%    skip:93.3%
+[libx264 @ 0x56330266ef00] mb B  I16..4:  0.2%  0.0%  0.0%  B16..8:  0.7%  0.1%  0.0%  direct: 0.2%  skip:98.7%  L0:40.6% L1:57.0% BI: 2.4%
+[libx264 @ 0x56330266ef00] 8x8 transform intra:3.2% inter:4.2%
+[libx264 @ 0x56330266ef00] coded y,uvDC,uvAC intra: 21.1% 28.6% 25.2% inter: 0.4% 0.4% 0.2%
+[libx264 @ 0x56330266ef00] i16 v,h,dc,p: 67% 31%  2%  0%
+[libx264 @ 0x56330266ef00] i8 v,h,dc,ddl,ddr,vr,hd,vl,hu: 16% 23% 55%  1%  1%  3%  0%  0%  1%
+[libx264 @ 0x56330266ef00] i4 v,h,dc,ddl,ddr,vr,hd,vl,hu: 36% 22% 20%  3%  3%  5%  4%  4%  3%
+[libx264 @ 0x56330266ef00] i8c dc,h,v,p: 59% 28% 13%  1%
+[libx264 @ 0x56330266ef00] Weighted P-Frames: Y:0.0% UV:0.0%
+[libx264 @ 0x56330266ef00] kb/s:1601.20
+Exiting normally, received signal 2.

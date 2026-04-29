@@ -1,0 +1,40 @@
+scene_name: clustered_15_half_b
+ball_names:
+  - tennis_ball_1
+  - tennis_ball_2
+  - tennis_ball_3
+  - tennis_ball_4
+  - tennis_ball_5
+  - tennis_ball_6
+  - tennis_ball_7
+  - tennis_ball_8
+  - tennis_ball_9
+  - tennis_ball_10
+  - tennis_ball_11
+  - tennis_ball_12
+  - tennis_ball_13
+  - tennis_ball_14
+  - tennis_ball_15
+balls:
+  # Cluster A
+  - {name: tennis_ball_1,  x: 1.26, y: 2.04, z: 0.033}
+  - {name: tennis_ball_2,  x: 1.92, y: 1.22, z: 0.033}
+  - {name: tennis_ball_3,  x: 2.18, y: 1.84, z: 0.033}
+  - {name: tennis_ball_4,  x: 1.54, y: 0.96, z: 0.033}
+
+  # Cluster B
+  - {name: tennis_ball_5,  x: 3.34, y: -1.12, z: 0.033}
+  - {name: tennis_ball_6,  x: 3.92, y: -1.86, z: 0.033}
+  - {name: tennis_ball_7,  x: 4.18, y: -1.26, z: 0.033}
+  - {name: tennis_ball_8,  x: 3.56, y: -2.02, z: 0.033}
+  - {name: tennis_ball_9,  x: 4.02, y: -0.94, z: 0.033}
+
+  # Cluster C
+  - {name: tennis_ball_10, x: 5.08, y: 2.22, z: 0.033}
+  - {name: tennis_ball_11, x: 5.74, y: 1.38, z: 0.033}
+  - {name: tennis_ball_12, x: 6.02, y: 2.08, z: 0.033}
+
+  # Singles
+  - {name: tennis_ball_13, x: 2.86, y: -2.74, z: 0.033}
+  - {name: tennis_ball_14, x: 4.72, y: 0.12, z: 0.033}
+  - {name: tennis_ball_15, x: 6.58, y: -0.28, z: 0.033}

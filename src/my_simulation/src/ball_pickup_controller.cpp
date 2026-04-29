@@ -156,6 +156,7 @@ private:
         pnh_.param("forward_control_heading_threshold", forward_control_heading_threshold_, 0.60);
         pnh_.param("target_loss_timeout", target_loss_timeout_, 0.5);
         pnh_.param("target_view_heading_half_angle", target_view_heading_half_angle_, 0.75);
+        pnh_.param("target_distance_tie_threshold", target_distance_tie_threshold_, 0.10);
         pnh_.param("search_rotate_speed", search_rotate_speed_, 0.35);
         pnh_.param("search_brake_duration_sec", search_brake_duration_sec_, 0.25);
         pnh_.param("heading_deadband", heading_deadband_, 0.03);
@@ -243,6 +244,7 @@ private:
 
     bool selectNearestTarget(double robot_x, double robot_y, std::string& target_name) {
         double best_distance = std::numeric_limits<double>::max();
+        double best_rel_lateral = 0.0;
         bool found = false;
 
         for (const auto& entry : balls_) {
@@ -254,10 +256,21 @@ private:
             const double dx = ball.world_x - robot_x;
             const double dy = ball.world_y - robot_y;
             const double distance = std::hypot(dx, dy);
-            if (distance < best_distance) {
+            const double rel_lateral = dy;
+            if (distance < (best_distance - target_distance_tie_threshold_)) {
                 best_distance = distance;
+                best_rel_lateral = rel_lateral;
                 target_name = ball.name;
                 found = true;
+            } else if (std::abs(distance - best_distance) <= target_distance_tie_threshold_) {
+                const bool current_is_right = rel_lateral < 0.0;
+                const bool best_is_right = best_rel_lateral < 0.0;
+                if (current_is_right && !best_is_right) {
+                    best_distance = distance;
+                    best_rel_lateral = rel_lateral;
+                    target_name = ball.name;
+                    found = true;
+                }
             }
         }
 
@@ -298,6 +311,7 @@ private:
                                      double robot_yaw,
                                      std::string& target_name) {
         double best_visible_distance = std::numeric_limits<double>::max();
+        double best_visible_rel_lateral = 0.0;
         std::string visible_target_name;
 
         for (const auto& entry : balls_) {
@@ -316,9 +330,18 @@ private:
                 continue;
             }
 
-            if (distance < best_visible_distance) {
+            if (distance < (best_visible_distance - target_distance_tie_threshold_)) {
                 best_visible_distance = distance;
+                best_visible_rel_lateral = rel_lateral;
                 visible_target_name = ball.name;
+            } else if (std::abs(distance - best_visible_distance) <= target_distance_tie_threshold_) {
+                const bool current_is_right = rel_lateral < 0.0;
+                const bool best_is_right = best_visible_rel_lateral < 0.0;
+                if (current_is_right && !best_is_right) {
+                    best_visible_distance = distance;
+                    best_visible_rel_lateral = rel_lateral;
+                    visible_target_name = ball.name;
+                }
             }
         }
 
@@ -1382,6 +1405,7 @@ private:
     double forward_control_heading_threshold_ = 0.60;
     double target_loss_timeout_ = 0.5;
     double target_view_heading_half_angle_ = 0.75;
+    double target_distance_tie_threshold_ = 0.10;
     double search_rotate_speed_ = 0.35;
     double search_brake_duration_sec_ = 0.25;
     double heading_deadband_ = 0.03;

@@ -1,0 +1,40 @@
+scene_name: clustered_15_half_compact
+ball_names:
+  - tennis_ball_1
+  - tennis_ball_2
+  - tennis_ball_3
+  - tennis_ball_4
+  - tennis_ball_5
+  - tennis_ball_6
+  - tennis_ball_7
+  - tennis_ball_8
+  - tennis_ball_9
+  - tennis_ball_10
+  - tennis_ball_11
+  - tennis_ball_12
+  - tennis_ball_13
+  - tennis_ball_14
+  - tennis_ball_15
+balls:
+  # Cluster A: 4 balls, random-like layout inside an approximately 2 m x 2 m local window
+  - {name: tennis_ball_1,  x: 1.30, y: 0.92, z: 0.033}
+  - {name: tennis_ball_2,  x: 1.88, y: 1.73, z: 0.033}
+  - {name: tennis_ball_3,  x: 2.42, y: 1.16, z: 0.033}
+  - {name: tennis_ball_4,  x: 1.62, y: 2.11, z: 0.033}
+
+  # Cluster B: 5 balls, random-like layout inside an approximately 2 m x 2 m local window
+  - {name: tennis_ball_5,  x: 3.18, y: -2.12, z: 0.033}
+  - {name: tennis_ball_6,  x: 3.74, y: -1.32, z: 0.033}
+  - {name: tennis_ball_7,  x: 4.22, y: -1.88, z: 0.033}
+  - {name: tennis_ball_8,  x: 3.56, y: -0.94, z: 0.033}
+  - {name: tennis_ball_9,  x: 4.04, y: -1.18, z: 0.033}
+
+  # Cluster C: 3 balls, random-like layout inside an approximately 2 m x 2 m local window
+  - {name: tennis_ball_10, x: 5.22, y: 1.08, z: 0.033}
+  - {name: tennis_ball_11, x: 6.08, y: 1.94, z: 0.033}
+  - {name: tennis_ball_12, x: 5.58, y: 2.42, z: 0.033}
+
+  # Singles in the same half court, still inside the compact half-court activity region
+  - {name: tennis_ball_13, x: 2.78, y: -2.68, z: 0.033}
+  - {name: tennis_ball_14, x: 4.92, y: 0.26, z: 0.033}
+  - {name: tennis_ball_15, x: 6.84, y: -0.48, z: 0.033}

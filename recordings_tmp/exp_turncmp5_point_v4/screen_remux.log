@@ -1,0 +1,31 @@
+ffmpeg version git-2026-04-19-de18feb Copyright (c) 2000-2026 the FFmpeg developers
+  built with gcc 9 (Ubuntu 9.4.0-1ubuntu1~20.04.2)
+  configuration: --enable-shared --enable-gpl --enable-libx264
+  libavutil      60. 30.100 / 60. 30.100
+  libavcodec     62. 30.100 / 62. 30.100
+  libavformat    62. 13.102 / 62. 13.102
+  libavdevice    62.  4.100 / 62.  4.100
+  libavfilter    11. 15.101 / 11. 15.101
+  libswscale      9.  7.100 /  9.  7.100
+  libswresample   6.  4.100 /  6.  4.100
+Input #0, matroska,webm, from '/home/lmy/catkin_ws/recordings_tmp/exp_turncmp5_point_v4/screen.mkv':
+  Metadata:
+    ENCODER         : Lavf62.13.102
+  Duration: 00:00:41.08, start: 0.000000, bitrate: 313 kb/s
+  Stream #0:0: Video: h264 (High), yuv420p(tv, progressive), 2870x1602, 25 fps, 25 tbr, 1k tbn
+    Metadata:
+      ENCODER         : Lavc62.30.100 libx264
+      DURATION        : 00:00:41.080000000
+Stream mapping:
+  Stream #0:0 -> #0:0 (copy)
+Output #0, mp4, to '/mnt/hgfs/sharedFolder/exp_turncmp5_point_v4/screen.mp4':
+  Metadata:
+    encoder         : Lavf62.13.102
+  Stream #0:0: Video: h264 (High) (avc1 / 0x31637661), yuv420p(tv, progressive), 2870x1602, q=2-31, 25 fps, 25 tbr, 16k tbn
+    Metadata:
+      ENCODER         : Lavc62.30.100 libx264
+      DURATION        : 00:00:41.080000000
+Press [q] to stop, [?] for help
+[mp4 @ 0x55c0bb133240] Starting second pass: moving the moov atom to the beginning of the file
+[out#0/mp4 @ 0x55c0bb132200] video:1564KiB audio:0KiB subtitle:0KiB other streams:0KiB global headers:0KiB muxing overhead: 0.823160%
+frame= 1027 fps=0.0 q=-1.0 Lsize=    1577KiB time=00:00:41.00 bitrate= 315.1kbits/s speed= 906x elapsed=0:00:00.04    

@@ -78,6 +78,18 @@ resolve_scene_file() {
     sparse10)
       echo "${WORKSPACE_ROOT}/src/my_simulation/config/scenes/scene_10_sparse.yaml"
       ;;
+    half15)
+      echo "${WORKSPACE_ROOT}/src/my_simulation/config/scenes/scene_15_half_random.yaml"
+      ;;
+    turncmp5)
+      echo "${WORKSPACE_ROOT}/src/my_simulation/config/scenes/scene_turn_compare_5_random.yaml"
+      ;;
+    turncmp)
+      echo "${WORKSPACE_ROOT}/src/my_simulation/config/scenes/scene_turn_compare.yaml"
+      ;;
+    cluster15)
+      echo "${WORKSPACE_ROOT}/src/my_simulation/config/scenes/scene_15_clustered_half.yaml"
+      ;;
     cluster30)
       echo "${WORKSPACE_ROOT}/src/my_simulation/config/scenes/scene_30_clustered.yaml"
       ;;
@@ -92,7 +104,7 @@ resolve_scene_file() {
 }
 
 SCENE_FILE="$(resolve_scene_file)" || {
-  echo "场景参数无效: ${SCENE_KEY}，支持 demo4、sparse10、cluster30，或直接传入 scene yaml 路径。"
+  echo "场景参数无效: ${SCENE_KEY}，支持 demo4、sparse10、half15、turncmp5、turncmp、cluster15、cluster30，或直接传入 scene yaml 路径。"
   exit 1
 }
 
@@ -341,26 +353,20 @@ roslaunch my_simulation spawn_car.launch \
   scene_file:="${SCENE_FILE}" &
 ROS_PIDS+=($!)
 
-echo "等待仿真节点与双目话题就绪..."
+echo "等待仿真节点与调试图像话题就绪..."
 sleep "${SIM_LAUNCH_WAIT_SEC}"
-wait_for_topic "/stereo_camera/left/image_raw" "${WINDOW_WAIT_TIMEOUT_SEC}"
-wait_for_topic "/stereo_camera/right/image_raw" "${WINDOW_WAIT_TIMEOUT_SEC}"
+wait_for_topic "/stereo/debug_image" "${WINDOW_WAIT_TIMEOUT_SEC}"
 wait_for_service "/ball_pickup_controller/start" "${WINDOW_WAIT_TIMEOUT_SEC}"
 wait_for_topic "/ball_pickup_controller/pickup_complete" "${WINDOW_WAIT_TIMEOUT_SEC}"
 sleep "${CAMERA_STREAM_SETTLE_SEC}"
 
-echo "打开左目图像窗口..."
-launch_viewer "/stereo_camera/left/image_raw" "left"
-
-sleep "${VIEW_LAUNCH_GAP_SEC}"
-
-echo "打开右目图像窗口..."
-launch_viewer "/stereo_camera/right/image_raw" "right"
+echo "打开左右拼接调试窗口..."
+launch_viewer "/stereo/debug_image" "stereo_debug"
 
 SCREEN_GEOMETRY="$(get_screen_geometry)"
 
 echo "窗口已准备好。"
-echo "请先手动摆好 Gazebo、左目、右目窗口。"
+echo "请先手动摆好 Gazebo 和拼接调试窗口。"
 echo "准备开始时，按回车键：脚本会先倒计时 ${MANUAL_START_DELAY_SEC} 秒，再同时开始整屏录制和捡球。"
 read -r
 

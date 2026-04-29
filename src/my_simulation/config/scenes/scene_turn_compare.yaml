@@ -1,0 +1,27 @@
+scene_name: turn_compare_half_court
+ball_names:
+  - tennis_ball_1
+  - tennis_ball_2
+  - tennis_ball_3
+  - tennis_ball_4
+  - tennis_ball_5
+  - tennis_ball_6
+  - tennis_ball_7
+  - tennis_ball_8
+  - tennis_ball_9
+  - tennis_ball_10
+balls:
+  # Designed for A/B turning comparison:
+  # - x ordering is clear, so both strategies tend to choose the same sequence
+  # - lateral offsets are moderate and alternate, so point strategy keeps re-centering
+  # - segment strategy can keep moving with smaller extra rotations
+  - {name: tennis_ball_1,  x: 1.35, y: 0.20, z: 0.033}
+  - {name: tennis_ball_2,  x: 1.95, y: -0.22, z: 0.033}
+  - {name: tennis_ball_3,  x: 2.55, y: 0.18, z: 0.033}
+  - {name: tennis_ball_4,  x: 3.15, y: -0.20, z: 0.033}
+  - {name: tennis_ball_5,  x: 3.75, y: 0.24, z: 0.033}
+  - {name: tennis_ball_6,  x: 4.35, y: -0.18, z: 0.033}
+  - {name: tennis_ball_7,  x: 4.95, y: 0.22, z: 0.033}
+  - {name: tennis_ball_8,  x: 5.55, y: -0.24, z: 0.033}
+  - {name: tennis_ball_9,  x: 6.15, y: 0.16, z: 0.033}
+  - {name: tennis_ball_10, x: 6.75, y: -0.18, z: 0.033}

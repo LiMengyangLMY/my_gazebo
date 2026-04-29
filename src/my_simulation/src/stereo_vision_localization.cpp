@@ -529,8 +529,10 @@ private:
         std::vector<BoundingBox> boxes_r = detectObjects(rectified_r, net_, conf_threshold_, nms_threshold_);
         std::vector<std::pair<BoundingBox, BoundingBox>> matched_pairs = matchBoundingBoxes(boxes_l, boxes_r);
 
+        cv::Mat left_display = rectified_l.clone();
+        cv::Mat right_display = rectified_r.clone();
         cv::Mat combined_display;
-        cv::hconcat(rectified_l, rectified_r, combined_display);
+        cv::hconcat(left_display, right_display, combined_display);
         const int img_width = rectified_l.cols;
 
         geometry_msgs::PoseArray pose_array;
@@ -569,14 +571,27 @@ private:
                 cv::format("%.1f", compensated.first) + "cm X:" +
                 cv::format("%+.1f", compensated.second) + "cm";
 
-            cv::rectangle(combined_display, bl.rect, cv::Scalar(0, 255, 0), 2);
-            cv::putText(combined_display, label,
+            const cv::Scalar box_color(0, 0, 255);
+            cv::rectangle(left_display, bl.rect, box_color, 2);
+            cv::putText(left_display, label,
                         cv::Point(bl.rect.x, std::max(20, bl.rect.y - 10)),
-                        cv::FONT_HERSHEY_SIMPLEX, 0.55, cv::Scalar(0, 255, 0), 2);
+                        cv::FONT_HERSHEY_SIMPLEX, 0.55, box_color, 2);
+
+            cv::rectangle(right_display, br.rect, box_color, 2);
+            cv::putText(right_display, br.class_name,
+                        cv::Point(br.rect.x, std::max(20, br.rect.y - 10)),
+                        cv::FONT_HERSHEY_SIMPLEX, 0.55, box_color, 2);
 
             cv::Rect right_rect = br.rect;
             right_rect.x += img_width;
-            cv::rectangle(combined_display, right_rect, cv::Scalar(255, 0, 0), 2);
+            cv::rectangle(combined_display, bl.rect, box_color, 2);
+            cv::putText(combined_display, label,
+                        cv::Point(bl.rect.x, std::max(20, bl.rect.y - 10)),
+                        cv::FONT_HERSHEY_SIMPLEX, 0.55, box_color, 2);
+            cv::rectangle(combined_display, right_rect, box_color, 2);
+            cv::putText(combined_display, br.class_name,
+                        cv::Point(right_rect.x, std::max(20, right_rect.y - 10)),
+                        cv::FONT_HERSHEY_SIMPLEX, 0.55, box_color, 2);
             cv::line(combined_display,
                      cv::Point(static_cast<int>(bl.cx), static_cast<int>(bl.cy)),
                      cv::Point(static_cast<int>(br.cx) + img_width, static_cast<int>(br.cy)),
@@ -590,8 +605,8 @@ private:
             pose_array.poses.push_back(pose);
         }
 
-        publishImage(left_rect_pub_, rectified_l, left_msg->header, "bgr8");
-        publishImage(right_rect_pub_, rectified_r, right_msg->header, "bgr8");
+        publishImage(left_rect_pub_, left_display, left_msg->header, "bgr8");
+        publishImage(right_rect_pub_, right_display, right_msg->header, "bgr8");
         publishImage(debug_pub_, combined_display, left_msg->header, "bgr8");
         pose_pub_.publish(pose_array);
 
