@@ -73,6 +73,15 @@ private:
         ADVANCE
     };
 
+    enum class BehaviorState {
+        WAITING_START,
+        WAITING_DELAY,
+        SEARCHING,
+        TRACKING,
+        PICKUP_SUCCESS,
+        STOPPED_NO_TARGET
+    };
+
     bool isPointStrategy() const {
         return strategy_ == "point";
     }
@@ -96,6 +105,21 @@ private:
         pnh_.param("x_error_margin", x_error_margin_, 0.0241);
         pnh_.param("depth_error_margin", depth_error_margin_, 0.0356);
         pnh_.param("segment_pickup_side_shrink", segment_pickup_side_shrink_, 0.0356);
+        pnh_.param("segment_guidance_inset", segment_guidance_inset_, 0.0356);
+        pnh_.param("guard_capture_tip_forward_x", guard_capture_tip_forward_x_, 0.652);
+        pnh_.param("guard_capture_tip_half_width", guard_capture_tip_half_width_, 0.337);
+        pnh_.param("shared_advance_lateral_overflow_tolerance", shared_advance_lateral_overflow_tolerance_, 0.04);
+        pnh_.param("shared_advance_heading_tolerance", shared_advance_heading_tolerance_, 0.14);
+        pnh_.param("shared_realign_lateral_overflow_tolerance", shared_realign_lateral_overflow_tolerance_, 0.10);
+        pnh_.param("shared_realign_heading_tolerance", shared_realign_heading_tolerance_, 0.28);
+        pnh_.param("shared_realign_forward_error_threshold", shared_realign_forward_error_threshold_, 0.20);
+        pnh_.param("shared_advance_heading_deadband", shared_advance_heading_deadband_, 0.06);
+        pnh_.param("shared_advance_lateral_deadband", shared_advance_lateral_deadband_, 0.02);
+        pnh_.param("shared_advance_min_linear_speed", shared_advance_min_linear_speed_, 0.08);
+        pnh_.param("shared_advance_min_angular_speed", shared_advance_min_angular_speed_, 0.05);
+        pnh_.param("shared_advance_max_angular_speed", shared_advance_max_angular_speed_, 0.18);
+        pnh_.param("shared_rotate_min_angular_speed", shared_rotate_min_angular_speed_, 0.10);
+        pnh_.param("enable_recovery", enable_recovery_, false);
         pnh_.param("point_pick_heading_tolerance", point_pick_heading_tolerance_, 0.10);
         pnh_.param("point_pick_lateral_tolerance", point_pick_lateral_tolerance_, 0.05);
         pnh_.param("point_stuck_timeout_sec", point_stuck_timeout_sec_, 1.5);
@@ -127,6 +151,9 @@ private:
         pnh_.param("rotate_only_heading_threshold", rotate_only_heading_threshold_, 0.35);
         pnh_.param("forward_control_heading_threshold", forward_control_heading_threshold_, 0.60);
         pnh_.param("target_loss_timeout", target_loss_timeout_, 0.5);
+        pnh_.param("target_view_heading_half_angle", target_view_heading_half_angle_, 0.75);
+        pnh_.param("search_rotate_speed", search_rotate_speed_, 0.35);
+        pnh_.param("search_brake_duration_sec", search_brake_duration_sec_, 0.25);
         pnh_.param("heading_deadband", heading_deadband_, 0.03);
         pnh_.param("lateral_deadband", lateral_deadband_, 0.02);
         pnh_.param("segment_heading_enter_tolerance", segment_heading_enter_tolerance_, 0.12);
@@ -249,24 +276,130 @@ private:
         return !ball.last_seen.isZero() && (ros::Time::now() - ball.last_seen).toSec() <= target_loss_timeout_;
     }
 
-    bool selectTargetWithLock(double robot_x, double robot_y, std::string& target_name) {
-        if (!current_target_name_.empty()) {
-            auto current_it = balls_.find(current_target_name_);
-            if (current_it != balls_.end() && ballAvailable(current_it->second)) {
-                target_name = current_target_name_;
+    bool anyAvailableTargets() const {
+        for (const auto& entry : balls_) {
+            if (!entry.second.picked) {
                 return true;
             }
+        }
+        return false;
+    }
+
+    bool isBallInView(double rel_forward, double heading_abs) const {
+        return rel_forward > 0.0 && heading_abs <= target_view_heading_half_angle_;
+    }
+
+    bool selectVisibleTargetByPolicy(double robot_x,
+                                     double robot_y,
+                                     double robot_yaw,
+                                     std::string& target_name) {
+        double best_visible_distance = std::numeric_limits<double>::max();
+        std::string visible_target_name;
+
+        for (const auto& entry : balls_) {
+            const BallInfo& ball = entry.second;
+            if (!ballAvailable(ball)) {
+                continue;
+            }
+
+            double rel_forward = 0.0;
+            double rel_lateral = 0.0;
+            double heading = 0.0;
+            double distance = 0.0;
+            computeRelativeTarget(ball, robot_x, robot_y, robot_yaw, rel_forward, rel_lateral, heading, distance);
+
+            if (!isBallInView(rel_forward, std::abs(heading))) {
+                continue;
+            }
+
+            if (distance < best_visible_distance) {
+                best_visible_distance = distance;
+                visible_target_name = ball.name;
+            }
+        }
+
+        if (!visible_target_name.empty()) {
+            target_name = visible_target_name;
+            return true;
+        }
+
+        return false;
+    }
+
+    bool selectTargetWithLock(double robot_x,
+                              double robot_y,
+                              double robot_yaw,
+                              std::string& target_name) {
+        std::string policy_target_name;
+        const bool have_visible_policy_target = selectVisibleTargetByPolicy(robot_x, robot_y, robot_yaw, policy_target_name);
+
+        if (have_visible_policy_target) {
+            if (current_target_name_ != policy_target_name) {
+                current_target_name_ = policy_target_name;
+                setControlMode(ControlMode::ROTATE_ONLY);
+            }
+            target_name = current_target_name_;
+            return true;
+        }
+
+        if (!current_target_name_.empty()) {
             current_target_name_.clear();
             setControlMode(ControlMode::ROTATE_ONLY);
         }
 
-        if (!selectNearestTarget(robot_x, robot_y, target_name)) {
+        return false;
+    }
+
+    void resetSearchTracking() {
+        search_active_ = false;
+        search_accumulated_yaw_rad_ = 0.0;
+        search_last_yaw_rad_ = 0.0;
+        search_has_last_yaw_sample_ = false;
+        search_brake_end_time_ = ros::Time();
+    }
+
+    void beginSearch(double robot_yaw) {
+        if (search_active_) {
+            return;
+        }
+
+        // Hard-stop before search so the next command is a pure in-place
+        // rotation about the robot center.
+        stopRobot();
+        search_active_ = true;
+        search_accumulated_yaw_rad_ = 0.0;
+        search_last_yaw_rad_ = robot_yaw;
+        search_has_last_yaw_sample_ = true;
+        search_brake_end_time_ = ros::Time::now() + ros::Duration(search_brake_duration_sec_);
+        current_target_name_.clear();
+        setControlMode(ControlMode::ROTATE_ONLY);
+    }
+
+    bool isSearchBrakeActive() const {
+        return search_active_ && !search_brake_end_time_.isZero() && ros::Time::now() < search_brake_end_time_;
+    }
+
+    bool updateSearchProgress(double robot_yaw) {
+        if (!search_active_) {
             return false;
         }
 
-        current_target_name_ = target_name;
-        setControlMode(ControlMode::ROTATE_ONLY);
-        return true;
+        if (search_has_last_yaw_sample_) {
+            search_accumulated_yaw_rad_ += std::abs(normalizeAngle(robot_yaw - search_last_yaw_rad_));
+        } else {
+            search_has_last_yaw_sample_ = true;
+        }
+        search_last_yaw_rad_ = robot_yaw;
+        return search_accumulated_yaw_rad_ >= (2.0 * M_PI);
+    }
+
+    void publishSearchRotation() {
+        geometry_msgs::Twist cmd;
+        cmd.linear.x = 0.0;
+        cmd.angular.z = search_rotate_speed_;
+        last_linear_cmd_ = 0.0;
+        last_angular_cmd_ = cmd.angular.z;
+        cmd_pub_.publish(cmd);
     }
 
     bool computeRelativeTarget(const BallInfo& ball,
@@ -291,73 +424,99 @@ private:
                          double rel_forward,
                          double rel_lateral,
                          double heading) const {
+        (void)point_strategy;
+        (void)heading;
         const double effective_depth_tolerance = ball_radius_ + pickup_tolerance_ + depth_error_margin_;
 
-        if (point_strategy) {
-            const double effective_lateral_tolerance = point_pick_lateral_tolerance_ + x_error_margin_;
-            const double effective_heading_tolerance = point_pick_heading_tolerance_;
-            return std::abs(rel_lateral) <= effective_lateral_tolerance &&
-                   std::abs(heading) <= effective_heading_tolerance &&
-                   std::abs(rel_forward - front_boundary_x_) <= effective_depth_tolerance;
-        }
-
-        return std::abs(rel_lateral) <= segmentPickupBandHalfWidth() &&
-               std::abs(rel_forward - front_boundary_x_) <= effective_depth_tolerance;
+        return (std::abs(rel_lateral) <= segmentPickupBandHalfWidth() &&
+                std::abs(rel_forward - front_boundary_x_) <= effective_depth_tolerance) ||
+               isSegmentInGuardCaptureZone(rel_forward, rel_lateral);
     }
 
     double segmentPickupBandHalfWidth() const {
         return std::max(0.0, pickup_half_width_ - segment_pickup_side_shrink_);
     }
 
-    bool isSegmentAdvanceReady(double rel_forward,
-                               double rel_lateral) const {
-        if (rel_forward <= 0.0) {
+    bool isSegmentInGuardCaptureZone(double rel_forward, double rel_lateral) const {
+        if (rel_forward < front_boundary_x_ || rel_forward > guard_capture_tip_forward_x_) {
             return false;
         }
 
-        return std::abs(rel_lateral) <= segmentPickupBandHalfWidth();
+        const double start_half_width = segmentPickupBandHalfWidth();
+        const double end_half_width = std::max(start_half_width, guard_capture_tip_half_width_);
+        const double ratio = clamp((rel_forward - front_boundary_x_) /
+                                   std::max(1e-6, guard_capture_tip_forward_x_ - front_boundary_x_),
+                                   0.0,
+                                   1.0);
+        const double allowed_half_width = start_half_width + ratio * (end_half_width - start_half_width);
+        return std::abs(rel_lateral) <= allowed_half_width;
     }
 
-    double computeSegmentLateralOverflow(double rel_lateral) const {
-        return std::max(0.0, std::abs(rel_lateral) - segmentPickupBandHalfWidth());
-    }
-
-    double computeSegmentControlHeading(double rel_forward, double rel_lateral) const {
+    double computeBandControlHeading(double rel_forward,
+                                     double rel_lateral,
+                                     double band_half_width) const {
         if (rel_forward <= 0.0) {
             return std::atan2(rel_lateral, rel_forward);
         }
 
         const double lateral_abs = std::abs(rel_lateral);
-        if (lateral_abs <= segmentPickupBandHalfWidth()) {
+        if (lateral_abs <= band_half_width) {
             return 0.0;
         }
 
         const double distance = std::hypot(rel_forward, rel_lateral);
-        const double desired_bearing_abs = std::asin(clamp(segmentPickupBandHalfWidth() / std::max(distance, 1e-6), 0.0, 1.0));
+        const double desired_bearing_abs = std::asin(clamp(band_half_width / std::max(distance, 1e-6), 0.0, 1.0));
         const double desired_bearing = std::copysign(desired_bearing_abs, rel_lateral);
         return normalizeAngle(std::atan2(rel_lateral, rel_forward) - desired_bearing);
     }
 
+    double strategyControlBandHalfWidth(bool point_strategy) const {
+        (void)point_strategy;
+        return 0.0;
+    }
+
+    double computeStrategyLateralOverflow(bool point_strategy, double rel_lateral) const {
+        return std::max(0.0, std::abs(rel_lateral) - strategyControlBandHalfWidth(point_strategy));
+    }
+
     double computePointControlHeading(double rel_forward, double rel_lateral) const {
-        if (rel_forward <= 0.0) {
-            return std::atan2(rel_lateral, rel_forward);
-        }
-
-        const double lookahead_forward = std::max(rel_forward, point_heading_lookahead_);
-        return std::atan2(rel_lateral, lookahead_forward);
+        return computeBandControlHeading(rel_forward, rel_lateral, 0.0);
     }
 
-    bool isPointNearPickupWindow(double rel_forward) const {
-        return std::max(0.0, rel_forward - front_boundary_x_) <= point_close_advance_window_;
+    double computeStrategyControlHeading(bool point_strategy,
+                                         double rel_forward,
+                                         double rel_lateral) const {
+        (void)point_strategy;
+        return computePointControlHeading(rel_forward, rel_lateral);
     }
 
-    bool isPointAdvanceReady(double rel_forward,
-                             double rel_lateral) const {
+    bool isStrategyAdvanceReady(bool point_strategy,
+                                double rel_forward,
+                                double rel_lateral,
+                                double control_heading_abs) const {
         if (rel_forward <= 0.0) {
             return false;
         }
 
-        return std::abs(rel_lateral) <= point_advance_enter_lateral_tolerance_;
+        return computeStrategyLateralOverflow(point_strategy, rel_lateral) <= shared_advance_lateral_overflow_tolerance_ &&
+               control_heading_abs <= shared_advance_heading_tolerance_;
+    }
+
+    bool needStrategyRealign(bool point_strategy,
+                             double rel_forward,
+                             double rel_lateral,
+                             double control_heading_abs) const {
+        if (rel_forward <= 0.0) {
+            return true;
+        }
+
+        const double forward_error = std::max(0.0, rel_forward - front_boundary_x_);
+        if (forward_error <= shared_realign_forward_error_threshold_) {
+            return false;
+        }
+
+        return computeStrategyLateralOverflow(point_strategy, rel_lateral) > shared_realign_lateral_overflow_tolerance_ ||
+               control_heading_abs > shared_realign_heading_tolerance_;
     }
 
     double pointProgressScore(double rel_lateral, double heading) const {
@@ -429,13 +588,12 @@ private:
     bool isBallWithinPickupBand(bool point_strategy,
                                 double rel_forward,
                                 double rel_lateral) const {
+        (void)point_strategy;
         const double effective_depth_tolerance = ball_radius_ + pickup_tolerance_ + depth_error_margin_;
-        const double effective_half_width = point_strategy
-            ? (point_pick_lateral_tolerance_ + x_error_margin_)
-            : segmentPickupBandHalfWidth();
 
-        return std::abs(rel_lateral) <= effective_half_width &&
-               std::abs(rel_forward - front_boundary_x_) <= effective_depth_tolerance;
+        return (std::abs(rel_lateral) <= segmentPickupBandHalfWidth() &&
+                std::abs(rel_forward - front_boundary_x_) <= effective_depth_tolerance) ||
+               isSegmentInGuardCaptureZone(rel_forward, rel_lateral);
     }
 
     bool pickupBallsInContactBand(double robot_x, double robot_y, double robot_yaw) {
@@ -491,6 +649,7 @@ private:
             setControlMode(ControlMode::ROTATE_ONLY);
         }
         resetPointRecoveryTracking();
+        resetSearchTracking();
 
         gazebo_msgs::DeleteModel delete_srv;
         delete_srv.request.model_name = ball_name;
@@ -583,6 +742,7 @@ private:
         current_target_name_.clear();
         setControlMode(ControlMode::ROTATE_ONLY);
         resetPointRecoveryTracking();
+        resetSearchTracking();
 
         response.success = true;
         response.message = "ball_pickup_controller start accepted";
@@ -617,6 +777,7 @@ private:
         if (!path_samples_.empty()) {
             const PathSample& last = path_samples_.back();
             total_path_length_m_ += std::hypot(sample.x - last.x, sample.y - last.y);
+            total_abs_yaw_change_rad_ += std::abs(normalizeAngle(sample.yaw - last.yaw));
         }
 
         path_samples_.push_back(sample);
@@ -797,6 +958,7 @@ private:
             ? ((run_finished_ ? run_end_time_ : ros::Time::now()) - run_start_time_).toSec()
             : 0.0;
         const double avg_speed = (duration_sec > 1e-6) ? (total_path_length_m_ / duration_sec) : 0.0;
+        const double avg_abs_yaw_rate = (duration_sec > 1e-6) ? (total_abs_yaw_change_rad_ / duration_sec) : 0.0;
         const bool all_picked = (picked_ball_count_ == ball_names_.size());
 
         ofs << "# Pickup Experiment Summary\n\n";
@@ -809,6 +971,8 @@ private:
         ofs << "- Total pickup time (sim): `" << formatDouble(duration_sec, 3) << " s`\n";
         ofs << "- Total traveled distance: `" << formatDouble(total_path_length_m_, 3) << " m`\n";
         ofs << "- Average path speed: `" << formatDouble(avg_speed, 3) << " m/s`\n";
+        ofs << "- Total accumulated yaw change: `" << formatDouble(total_abs_yaw_change_rad_, 3) << " rad`\n";
+        ofs << "- Average absolute yaw rate: `" << formatDouble(avg_abs_yaw_rate, 3) << " rad/s`\n";
         ofs << "- Path samples: `" << path_samples_.size() << "`\n";
         ofs << "- Point recovery count: `" << point_recovery_count_ << "`\n\n";
 
@@ -867,56 +1031,48 @@ private:
         return (control_mode_ == ControlMode::ROTATE_ONLY) ? "ROTATE_ONLY" : "ADVANCE";
     }
 
+    const char* behaviorStateName() const {
+        switch (behavior_state_) {
+            case BehaviorState::WAITING_START:
+                return "WAITING_START";
+            case BehaviorState::WAITING_DELAY:
+                return "WAITING_DELAY";
+            case BehaviorState::SEARCHING:
+                return "SEARCHING";
+            case BehaviorState::TRACKING:
+                return "TRACKING";
+            case BehaviorState::PICKUP_SUCCESS:
+                return "PICKUP_SUCCESS";
+            case BehaviorState::STOPPED_NO_TARGET:
+                return "STOPPED_NO_TARGET";
+        }
+        return "UNKNOWN";
+    }
+
     void updateControlMode(bool point_strategy,
                            double rel_forward,
                            double rel_lateral,
                            double control_heading_abs,
                            double lateral_abs) {
-        if (point_strategy) {
-            const bool near_pickup_window = isPointNearPickupWindow(rel_forward);
-            const bool allow_mode_switch = canSwitchControlMode();
+        (void)lateral_abs;
+        const bool allow_mode_switch = canSwitchControlMode();
 
-            if (control_mode_ == ControlMode::ROTATE_ONLY) {
-                if (allow_mode_switch &&
-                    isPointAdvanceReady(rel_forward, rel_lateral)) {
-                    requestControlModeSwitch(ControlMode::ADVANCE);
-                } else {
-                    clearPendingModeSwitch();
-                }
+        if (control_mode_ == ControlMode::ROTATE_ONLY) {
+            if (allow_mode_switch &&
+                isStrategyAdvanceReady(point_strategy, rel_forward, rel_lateral, control_heading_abs)) {
+                setControlMode(ControlMode::ADVANCE);
             } else {
-                const bool need_point_realign =
-                    rel_forward <= 0.0 ||
-                    (!near_pickup_window &&
-                     rel_forward > point_rotate_recover_forward_threshold_ &&
-                     lateral_abs > point_advance_exit_lateral_tolerance_);
-
-                if (allow_mode_switch && need_point_realign) {
-                    requestControlModeSwitch(ControlMode::ROTATE_ONLY);
-                } else {
-                    clearPendingModeSwitch();
-                }
+                clearPendingModeSwitch();
             }
         } else {
-            const double lateral_overflow = computeSegmentLateralOverflow(rel_lateral);
-
-            if (control_mode_ == ControlMode::ROTATE_ONLY) {
-                if (isSegmentAdvanceReady(rel_forward, rel_lateral)) {
-                    setControlMode(ControlMode::ADVANCE);
-                } else {
-                    clearPendingModeSwitch();
-                }
+            const bool need_realign = needStrategyRealign(point_strategy,
+                                                          rel_forward,
+                                                          rel_lateral,
+                                                          control_heading_abs);
+            if (allow_mode_switch && need_realign) {
+                requestControlModeSwitch(ControlMode::ROTATE_ONLY);
             } else {
-                const bool allow_mode_switch = canSwitchControlMode();
-                const bool need_segment_realign =
-                    rel_forward <= 0.0 ||
-                    lateral_overflow > segment_realign_lateral_tolerance_ ||
-                    control_heading_abs > segment_realign_heading_tolerance_;
-
-                if (allow_mode_switch && need_segment_realign) {
-                    requestControlModeSwitch(ControlMode::ROTATE_ONLY);
-                } else {
-                    clearPendingModeSwitch();
-                }
+                clearPendingModeSwitch();
             }
         }
     }
@@ -925,54 +1081,42 @@ private:
         geometry_msgs::Twist cmd;
 
         const bool point_strategy = isPointStrategy();
-        const double control_heading = point_strategy
-            ? computePointControlHeading(rel_forward, rel_lateral)
-            : computeSegmentControlHeading(rel_forward, rel_lateral);
+        const double control_heading = computeStrategyControlHeading(point_strategy, rel_forward, rel_lateral);
         const double control_heading_abs = std::abs(control_heading);
-        const bool segment_advance_ready = !point_strategy && isSegmentAdvanceReady(rel_forward, rel_lateral);
-        const double lateral_abs = std::abs(rel_lateral);
-        const double segment_lateral_overflow = computeSegmentLateralOverflow(rel_lateral);
+        const bool advance_ready = isStrategyAdvanceReady(point_strategy,
+                                                          rel_forward,
+                                                          rel_lateral,
+                                                          control_heading_abs);
+        const double lateral_overflow = computeStrategyLateralOverflow(point_strategy, rel_lateral);
         const double forward_error = std::max(0.0, rel_forward - front_boundary_x_);
 
-        updateControlMode(point_strategy, rel_forward, rel_lateral, control_heading_abs, lateral_abs);
+        updateControlMode(point_strategy, rel_forward, rel_lateral, control_heading_abs, std::abs(rel_lateral));
 
         double heading_cmd = 0.0;
-        if (point_strategy) {
-            heading_cmd = (control_heading_abs > heading_deadband_) ? control_heading : 0.0;
-        } else if (control_mode_ == ControlMode::ROTATE_ONLY) {
-            heading_cmd = segment_advance_ready ? 0.0 : control_heading;
+        if (control_mode_ == ControlMode::ROTATE_ONLY) {
+            heading_cmd = advance_ready ? 0.0 : control_heading;
         } else {
-            heading_cmd = (control_heading_abs > heading_deadband_) ? control_heading : 0.0;
+            heading_cmd = (control_heading_abs > shared_advance_heading_deadband_) ? control_heading : 0.0;
         }
-        double reduced_heading_gain = (forward_error < 0.50) ? (0.45 * heading_gain_) : (0.75 * heading_gain_);
 
         if (control_mode_ == ControlMode::ROTATE_ONLY) {
             cmd.linear.x = 0.0;
-            if (!point_strategy && !segment_advance_ready && control_heading_abs > 1e-4) {
+            if (!advance_ready && control_heading_abs > 1e-4) {
                 const double requested_angular = heading_gain_ * heading_cmd;
                 const double angular_sign = (requested_angular >= 0.0) ? 1.0 : -1.0;
-                const double angular_mag = std::max(segment_rotate_min_angular_speed_, std::abs(requested_angular));
+                const double angular_mag = std::max(shared_rotate_min_angular_speed_, std::abs(requested_angular));
                 cmd.angular.z = angular_sign * clamp(angular_mag, 0.0, max_angular_speed_);
             } else {
-                cmd.angular.z = clamp(heading_gain_ * heading_cmd, -max_angular_speed_, max_angular_speed_);
+                cmd.angular.z = 0.0;
             }
         } else {
             double linear_cmd = distance_gain_ * forward_error;
             linear_cmd = clamp(linear_cmd, 0.0, max_linear_speed_);
-
-            if (point_strategy) {
-                const double point_lateral_scale = (lateral_abs <= lateral_deadband_)
-                    ? 1.0
-                    : clamp(1.0 - lateral_abs / std::max(0.12, point_close_lateral_exit_tolerance_), 0.55, 1.0);
-                linear_cmd *= point_lateral_scale;
-                linear_cmd = std::max(0.06, linear_cmd);
-            } else {
-                const double lateral_scale = (segment_lateral_overflow <= lateral_deadband_)
-                    ? 1.0
-                    : clamp(1.0 - segment_lateral_overflow / std::max(0.20, pickup_half_width_), 0.35, 1.0);
-                linear_cmd *= lateral_scale;
-                linear_cmd = std::max(0.12, linear_cmd);
-            }
+            const double lateral_scale = (lateral_overflow <= shared_advance_lateral_deadband_)
+                ? 1.0
+                : clamp(1.0 - lateral_overflow / std::max(0.20, pickup_half_width_), 0.35, 1.0);
+            linear_cmd *= lateral_scale;
+            linear_cmd = std::max(shared_advance_min_linear_speed_, linear_cmd);
 
             if (forward_error < 0.10) {
                 linear_cmd = std::min(linear_cmd, 0.10);
@@ -981,24 +1125,21 @@ private:
             }
 
             cmd.linear.x = linear_cmd;
-            if (point_strategy) {
-                const bool allow_forward_steer = control_heading_abs > advance_heading_deadband_ &&
-                                                 lateral_abs > point_advance_lateral_deadband_;
-                const double forward_heading_cmd = allow_forward_steer ? control_heading : 0.0;
-                const double point_heading_gain = isPointNearPickupWindow(rel_forward)
-                    ? (0.20 * heading_gain_)
-                    : (0.28 * heading_gain_);
-                cmd.angular.z = clamp(point_heading_gain * forward_heading_cmd,
-                                      -point_advance_max_angular_speed_,
-                                      point_advance_max_angular_speed_);
+            const bool allow_forward_steer =
+                (control_heading_abs > shared_advance_heading_deadband_ &&
+                 lateral_overflow > shared_advance_lateral_deadband_);
+            const double forward_heading_cmd = allow_forward_steer ? control_heading : 0.0;
+            const double shared_heading_gain = (forward_error < 0.50) ? (0.12 * heading_gain_) : (0.20 * heading_gain_);
+            if (allow_forward_steer && std::abs(forward_heading_cmd) > 1e-4) {
+                const double requested_angular = shared_heading_gain * forward_heading_cmd;
+                const double angular_sign = (requested_angular >= 0.0) ? 1.0 : -1.0;
+                const double min_angular_speed = 0.0;
+                const double angular_mag = std::max(min_angular_speed, std::abs(requested_angular));
+                cmd.angular.z = angular_sign * clamp(angular_mag,
+                                                     0.0,
+                                                     shared_advance_max_angular_speed_);
             } else {
-                const bool allow_forward_steer = control_heading_abs > advance_heading_deadband_ &&
-                                                 segment_lateral_overflow > segment_advance_lateral_deadband_;
-                const double forward_heading_cmd = allow_forward_steer ? control_heading : 0.0;
-                const double segment_heading_gain = (forward_error < 0.50) ? (0.12 * heading_gain_) : (0.20 * heading_gain_);
-                cmd.angular.z = clamp(segment_heading_gain * forward_heading_cmd,
-                                      -segment_advance_max_angular_speed_,
-                                      segment_advance_max_angular_speed_);
+                cmd.angular.z = 0.0;
             }
         }
 
@@ -1006,13 +1147,24 @@ private:
             cmd.linear.x = 0.0;
         }
 
-        cmd_pub_.publish(smoothCommand(cmd));
+        if (control_mode_ == ControlMode::ROTATE_ONLY) {
+            // Any rotate-only behavior must be a pure in-place turn: no
+            // residual forward smoothing is allowed.
+            cmd.linear.x = 0.0;
+            last_linear_cmd_ = 0.0;
+            last_angular_cmd_ = cmd.angular.z;
+            cmd_pub_.publish(cmd);
+        } else {
+            cmd_pub_.publish(smoothCommand(cmd));
+        }
     }
 
     void controlTimerCallback(const ros::TimerEvent&) {
         if (wait_for_manual_start_ && !manual_start_requested_) {
+            behavior_state_ = BehaviorState::WAITING_START;
             stopRobot();
-            ROS_INFO_THROTTLE(1.0, "ball_pickup_controller waiting for manual start request.");
+            ROS_INFO_THROTTLE(1.0, "state=%s strategy=%s waiting for manual start request.",
+                              behaviorStateName(), strategy_.c_str());
             return;
         }
 
@@ -1022,9 +1174,10 @@ private:
         }
 
         if ((ros::Time::now() - startup_reference_time_).toSec() < startup_delay_sec_) {
+            behavior_state_ = BehaviorState::WAITING_DELAY;
             stopRobot();
-            ROS_INFO_THROTTLE(1.0, "ball_pickup_controller waiting for startup delay: %.1fs",
-                              startup_delay_sec_);
+            ROS_INFO_THROTTLE(1.0, "state=%s strategy=%s waiting for startup delay: %.1fs",
+                              behaviorStateName(), strategy_.c_str(), startup_delay_sec_);
             return;
         }
 
@@ -1038,24 +1191,56 @@ private:
 
         recordPathSample(robot_x, robot_y, robot_yaw);
 
-        if (isPointStrategy() && handlePointRecoveryIfActive()) {
+        if (enable_recovery_ && handlePointRecoveryIfActive()) {
             return;
         }
 
         if (pickupBallsInContactBand(robot_x, robot_y, robot_yaw)) {
+            behavior_state_ = BehaviorState::PICKUP_SUCCESS;
             stopRobot();
             return;
         }
 
         std::string target_name;
-        if (!selectTargetWithLock(robot_x, robot_y, target_name)) {
-            stopRobot();
+        if (!selectTargetWithLock(robot_x, robot_y, robot_yaw, target_name)) {
             current_target_name_.clear();
-            setControlMode(ControlMode::ROTATE_ONLY);
-            markRunFinishedIfNeeded();
-            ROS_INFO_THROTTLE(2.0, "All balls picked or no visible targets left.");
+
+            if (!anyAvailableTargets()) {
+                behavior_state_ = BehaviorState::STOPPED_NO_TARGET;
+                stopRobot();
+                setControlMode(ControlMode::ROTATE_ONLY);
+                resetSearchTracking();
+                markRunFinishedIfNeeded();
+                ROS_INFO_THROTTLE(2.0, "state=%s strategy=%s all balls picked or no visible targets left.",
+                                  behaviorStateName(), strategy_.c_str());
+                return;
+            }
+
+            behavior_state_ = BehaviorState::SEARCHING;
+            beginSearch(robot_yaw);
+            if (isSearchBrakeActive()) {
+                stopRobot();
+                ROS_INFO_THROTTLE(1.0, "state=%s strategy=%s braking before in-place search rotation.",
+                                  behaviorStateName(), strategy_.c_str());
+                return;
+            }
+            if (updateSearchProgress(robot_yaw)) {
+                behavior_state_ = BehaviorState::STOPPED_NO_TARGET;
+                stopRobot();
+                resetSearchTracking();
+                markRunFinishedIfNeeded();
+                ROS_INFO_THROTTLE(2.0, "state=%s strategy=%s completed one full search rotation without finding a ball. Robot stopped.",
+                                  behaviorStateName(), strategy_.c_str());
+                return;
+            }
+
+            publishSearchRotation();
+            ROS_INFO_THROTTLE(1.0, "state=%s strategy=%s search_yaw=%.3f rotating in place to search for balls.",
+                              behaviorStateName(), strategy_.c_str(), search_accumulated_yaw_rad_);
             return;
         }
+        resetSearchTracking();
+        behavior_state_ = BehaviorState::TRACKING;
 
         const BallInfo& target_ball = balls_.at(target_name);
 
@@ -1064,13 +1249,13 @@ private:
         double heading = 0.0;
         double distance = 0.0;
         computeRelativeTarget(target_ball, robot_x, robot_y, robot_yaw, rel_forward, rel_lateral, heading, distance);
-        const double point_progress_heading = isPointStrategy()
-            ? computePointControlHeading(rel_forward, rel_lateral)
-            : heading;
+        const double progress_heading = computeStrategyControlHeading(isPointStrategy(), rel_forward, rel_lateral);
 
-        if (isPointStrategy()) {
+        if (enable_recovery_) {
             if (control_mode_ == ControlMode::ROTATE_ONLY) {
-                updatePointProgress(target_name, rel_lateral, point_progress_heading);
+                updatePointProgress(target_name,
+                                    computeStrategyLateralOverflow(isPointStrategy(), rel_lateral),
+                                    progress_heading);
                 if (!point_last_progress_time_.isZero() &&
                     (ros::Time::now() - point_last_progress_time_).toSec() >= point_stuck_timeout_sec_) {
                     beginPointRecovery(rel_lateral);
@@ -1082,6 +1267,7 @@ private:
         }
 
         if (isPickupSuccess(isPointStrategy(), rel_forward, rel_lateral, heading)) {
+            behavior_state_ = BehaviorState::PICKUP_SUCCESS;
             stopRobot();
             removePickedBall(target_name);
             return;
@@ -1090,8 +1276,9 @@ private:
         publishControl(rel_forward, rel_lateral, heading, distance);
 
         ROS_INFO_THROTTLE(1.0,
-                          "target=%s forward=%.3f lateral=%.3f heading=%.3f strategy=%s mode=%s",
-                          target_name.c_str(), rel_forward, rel_lateral, heading, strategy_.c_str(), controlModeName());
+                          "state=%s target=%s forward=%.3f lateral=%.3f heading=%.3f strategy=%s mode=%s",
+                          behaviorStateName(), target_name.c_str(), rel_forward, rel_lateral, heading,
+                          strategy_.c_str(), controlModeName());
     }
 
     ros::NodeHandle nh_;
@@ -1122,6 +1309,21 @@ private:
     double x_error_margin_ = 0.0241;
     double depth_error_margin_ = 0.0356;
     double segment_pickup_side_shrink_ = 0.0356;
+    double segment_guidance_inset_ = 0.0356;
+    double guard_capture_tip_forward_x_ = 0.652;
+    double guard_capture_tip_half_width_ = 0.337;
+    double shared_advance_lateral_overflow_tolerance_ = 0.04;
+    double shared_advance_heading_tolerance_ = 0.14;
+    double shared_realign_lateral_overflow_tolerance_ = 0.10;
+    double shared_realign_heading_tolerance_ = 0.28;
+    double shared_realign_forward_error_threshold_ = 0.20;
+    double shared_advance_heading_deadband_ = 0.06;
+    double shared_advance_lateral_deadband_ = 0.02;
+    double shared_advance_min_linear_speed_ = 0.08;
+    double shared_advance_min_angular_speed_ = 0.05;
+    double shared_advance_max_angular_speed_ = 0.18;
+    double shared_rotate_min_angular_speed_ = 0.10;
+    bool enable_recovery_ = false;
     double point_pick_heading_tolerance_ = 0.10;
     double point_pick_lateral_tolerance_ = 0.05;
     double point_stuck_timeout_sec_ = 1.5;
@@ -1153,6 +1355,9 @@ private:
     double rotate_only_heading_threshold_ = 0.35;
     double forward_control_heading_threshold_ = 0.60;
     double target_loss_timeout_ = 0.5;
+    double target_view_heading_half_angle_ = 0.75;
+    double search_rotate_speed_ = 0.35;
+    double search_brake_duration_sec_ = 0.25;
     double heading_deadband_ = 0.03;
     double lateral_deadband_ = 0.02;
     double segment_heading_enter_tolerance_ = 0.12;
@@ -1169,6 +1374,7 @@ private:
     std::string artifacts_output_dir_;
     std::vector<PathSample> path_samples_;
     double total_path_length_m_ = 0.0;
+    double total_abs_yaw_change_rad_ = 0.0;
     std::size_t picked_ball_count_ = 0;
     bool run_started_ = false;
     bool run_finished_ = false;
@@ -1186,9 +1392,15 @@ private:
 
     std::string current_target_name_;
     ControlMode control_mode_ = ControlMode::ROTATE_ONLY;
+    BehaviorState behavior_state_ = BehaviorState::WAITING_START;
     ControlMode pending_control_mode_ = ControlMode::ROTATE_ONLY;
     bool pending_mode_switch_valid_ = false;
     int pending_mode_switch_count_ = 0;
+    bool search_active_ = false;
+    bool search_has_last_yaw_sample_ = false;
+    double search_last_yaw_rad_ = 0.0;
+    double search_accumulated_yaw_rad_ = 0.0;
+    ros::Time search_brake_end_time_;
     ros::Time control_mode_last_switch_time_;
     ros::Time startup_reference_time_;
     bool startup_time_initialized_ = false;

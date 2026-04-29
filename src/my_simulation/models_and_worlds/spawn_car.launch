@@ -50,6 +50,21 @@
     <param name="x_error_margin" value="0.0241"/>
     <param name="depth_error_margin" value="0.0356"/>
     <param name="segment_pickup_side_shrink" value="0.0356"/>
+    <param name="segment_guidance_inset" value="0.0356"/>
+    <param name="guard_capture_tip_forward_x" value="0.652"/>
+    <param name="guard_capture_tip_half_width" value="0.337"/>
+    <param name="shared_advance_lateral_overflow_tolerance" value="0.04"/>
+    <param name="shared_advance_heading_tolerance" value="0.14"/>
+    <param name="shared_realign_lateral_overflow_tolerance" value="0.10"/>
+    <param name="shared_realign_heading_tolerance" value="0.28"/>
+    <param name="shared_realign_forward_error_threshold" value="0.20"/>
+    <param name="shared_advance_heading_deadband" value="0.06"/>
+    <param name="shared_advance_lateral_deadband" value="0.02"/>
+    <param name="shared_advance_min_linear_speed" value="0.08"/>
+    <param name="shared_advance_min_angular_speed" value="0.05"/>
+    <param name="shared_advance_max_angular_speed" value="0.18"/>
+    <param name="shared_rotate_min_angular_speed" value="0.10"/>
+    <param name="enable_recovery" value="false"/>
     <param name="point_pick_heading_tolerance" value="0.14"/>
     <param name="point_pick_lateral_tolerance" value="0.07"/>
     <param name="point_realign_heading_tolerance" value="0.40"/>
@@ -57,7 +72,7 @@
     <param name="advance_heading_deadband" value="0.12"/>
     <param name="point_advance_lateral_deadband" value="0.08"/>
     <param name="point_advance_max_angular_speed" value="0.12"/>
-    <param name="control_mode_hold_sec" value="0.45"/>
+    <param name="control_mode_hold_sec" value="0.15"/>
     <param name="control_mode_switch_confirm_cycles" value="6"/>
     <param name="linear_cmd_slew_rate" value="0.55"/>
     <param name="angular_cmd_slew_rate" value="0.90"/>

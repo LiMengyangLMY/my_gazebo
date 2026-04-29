@@ -10,13 +10,6 @@ BALL_SDF_TEMPLATE = """<?xml version='1.0'?>
   <model name='{name}'>
     <static>true</static>
     <link name='link'>
-      <collision name='collision'>
-        <geometry>
-          <sphere>
-            <radius>{radius}</radius>
-          </sphere>
-        </geometry>
-      </collision>
       <visual name='visual'>
         <geometry>
           <sphere>

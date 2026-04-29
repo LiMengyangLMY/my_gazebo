@@ -1,0 +1,97 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1260" height="820" viewBox="0 0 1260 820">
+  <defs>
+    <style>
+      .title { font: 700 30px sans-serif; fill: #1f2937; }
+      .label { font: 600 18px sans-serif; fill: #374151; }
+      .note { font: 15px sans-serif; fill: #4b5563; }
+      .dim { font: 18px sans-serif; fill: #b91c1c; }
+      .body { fill: #93c5fd; stroke: #1d4ed8; stroke-width: 2.5; }
+      .guard { fill: #93c5fd; stroke: #1d4ed8; stroke-width: 2.5; }
+      .wheel { fill: #6b7280; stroke: #111827; stroke-width: 1.5; }
+      .camera { fill: #06b6d4; stroke: #0f172a; stroke-width: 1.5; }
+      .panel { fill: #ffffff; stroke: #cbd5e1; stroke-width: 1.5; }
+      .fovfill { fill: rgba(6, 182, 212, 0.14); stroke: none; }
+      .fovline { stroke: #0891b2; stroke-width: 2; stroke-dasharray: 7 6; fill: none; }
+      .fovdimline { stroke: #0891b2; stroke-width: 1.8; marker-start: url(#arrowBlue); marker-end: url(#arrowBlue); }
+      .fovtick { stroke: #0891b2; stroke-width: 1.4; }
+      .dimline { stroke: #dc2626; stroke-width: 1.8; marker-start: url(#arrow); marker-end: url(#arrow); }
+      .tick { stroke: #dc2626; stroke-width: 1.4; }
+    </style>
+    <marker id="arrow" viewBox="0 0 10 10" refX="5" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+      <path d="M 0 0 L 10 5 L 0 10 z" fill="#dc2626"/>
+    </marker>
+    <marker id="arrowBlue" viewBox="0 0 10 10" refX="5" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+      <path d="M 0 0 L 10 5 L 0 10 z" fill="#0891b2"/>
+    </marker>
+  </defs>
+
+  <rect x="0" y="0" width="1260" height="820" fill="#ffffff"/>
+  <text x="40" y="48" class="title">Simple Car Top View</text>
+  <text x="40" y="78" class="note">Dimensions are derived from the current URDF model.</text>
+
+  <rect x="40" y="110" width="1180" height="670" rx="18" ry="18" class="panel"/>
+
+  <g transform="translate(600,400)">
+    <!-- Camera horizontal FOV = 80 deg -->
+    <path d="M 150 0 L 391 -202 L 391 202 Z" class="fovfill"/>
+    <line x1="150" y1="0" x2="391" y2="-202" class="fovline"/>
+    <line x1="150" y1="0" x2="391" y2="202" class="fovline"/>
+    <line x1="150" y1="0" x2="391" y2="0" class="fovline"/>
+
+    <!-- Guards (under body) -->
+    <g transform="translate(240,-144) rotate(-34.377)">
+      <rect x="-165" y="-5.4" width="330" height="10.8" class="guard"/>
+      <circle cx="183" cy="0" r="24" class="guard"/>
+    </g>
+    <g transform="translate(240,144) rotate(34.377)">
+      <rect x="-165" y="-5.4" width="330" height="10.8" class="guard"/>
+      <circle cx="183" cy="0" r="24" class="guard"/>
+    </g>
+
+    <!-- Body -->
+    <rect x="-150" y="-150" width="300" height="300" class="body"/>
+
+    <!-- Camera -->
+    <rect x="144" y="-30" width="12" height="60" class="camera"/>
+    <circle cx="150" cy="0" r="4" fill="#0891b2"/>
+
+    <!-- Wheels -->
+    <rect x="90" y="-171" width="36" height="18" class="wheel"/>
+    <rect x="90" y="153" width="36" height="18" class="wheel"/>
+    <rect x="-126" y="-171" width="36" height="18" class="wheel"/>
+    <rect x="-126" y="153" width="36" height="18" class="wheel"/>
+  </g>
+
+  <!-- Body length -->
+  <line x1="450" y1="560" x2="750" y2="560" class="dimline"/>
+  <line x1="450" y1="530" x2="450" y2="570" class="tick"/>
+  <line x1="750" y1="530" x2="750" y2="570" class="tick"/>
+  <text x="545" y="592" class="dim">Body length = 0.50 m</text>
+
+  <!-- Body width -->
+  <line x1="812" y1="250" x2="812" y2="550" class="dimline"/>
+  <line x1="792" y1="250" x2="820" y2="250" class="tick"/>
+  <line x1="792" y1="550" x2="820" y2="550" class="tick"/>
+  <text x="840" y="404" class="dim" transform="rotate(90 840 404)">Body width = 0.50 m</text>
+
+  <!-- Guard outer-edge spacing -->
+  <line x1="1100" y1="150" x2="1100" y2="650" class="dimline"/>
+  <line x1="1078" y1="150" x2="1108" y2="150" class="tick"/>
+  <line x1="1078" y1="650" x2="1108" y2="650" class="tick"/>
+  <text x="1128" y="402" class="dim" transform="rotate(90 1128 402)">Outer guard edge spacing ≈ 0.904 m</text>
+
+  <!-- FOV width at guard-edge cutoff -->
+  <line x1="991" y1="198" x2="991" y2="602" class="fovdimline"/>
+  <line x1="972" y1="198" x2="1000" y2="198" class="fovtick"/>
+  <line x1="972" y1="602" x2="1000" y2="602" class="fovtick"/>
+  <text x="1016" y="400" class="label" fill="#0891b2" transform="rotate(90 1016 400)">FOV width at guard edge ≈ 0.674 m</text>
+
+  <text x="930" y="138" class="label" fill="#0891b2">Camera HFOV = 80°</text>
+
+  <!-- Notes -->
+  <text x="70" y="705" class="label">Key dimensions</text>
+  <text x="70" y="737" class="note">1. Body footprint: 0.50 m × 0.50 m</text>
+  <text x="70" y="767" class="note">2. Distance between the two outermost guard edges: ≈ 0.904 m</text>
+  <text x="520" y="737" class="note">3. Cyan sector shows the camera horizontal field of view</text>
+  <text x="520" y="767" class="note">4. FOV width where the sector reaches the guard-edge cutoff: ≈ 0.674 m</text>
+</svg>

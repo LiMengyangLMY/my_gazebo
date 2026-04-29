@@ -26,6 +26,8 @@ SESSION_EXPORT_DIR="${EXPORT_DIR}/${OUTPUT_PREFIX}"
 RAW_FILE="${SESSION_LOCAL_DIR}/screen.mkv"
 FINAL_FILE="${SESSION_EXPORT_DIR}/screen.mp4"
 RECORD_LOG_FILE="${SESSION_LOCAL_DIR}/screen_record.log"
+CMD_VEL_FILE="${SESSION_EXPORT_DIR}/cmd_vel.csv"
+ODOM_FILE="${SESSION_EXPORT_DIR}/odom.csv"
 
 source "${ROS_SETUP}"
 source "${CATKIN_SETUP}"
@@ -203,6 +205,22 @@ call_trigger_rosservice() {
   rosservice call "${service_name}" >/dev/null
 }
 
+start_topic_recorder() {
+  local topic="$1"
+  local output_file="$2"
+
+  rostopic echo -p "${topic}" >"${output_file}" 2>"${output_file}.log" &
+  local recorder_pid=$!
+  ROS_PIDS+=("${recorder_pid}")
+  sleep 1
+
+  if ! kill -0 "${recorder_pid}" >/dev/null 2>&1; then
+    echo "话题记录进程启动失败: ${topic}" >&2
+    cat "${output_file}.log" >&2 || true
+    return 1
+  fi
+}
+
 get_screen_geometry() {
   local geometry
   geometry="$(xrandr --current 2>/dev/null | awk '/\*/ {print $1; exit}')"
@@ -342,6 +360,10 @@ done
 echo "开始整屏录制..."
 start_screen_recording "${SCREEN_GEOMETRY}"
 
+echo "开始记录转向与里程信息..."
+start_topic_recorder "/cmd_vel" "${CMD_VEL_FILE}"
+start_topic_recorder "/odom" "${ODOM_FILE}"
+
 echo "发送开始捡球信号。"
 call_trigger_rosservice "/ball_pickup_controller/start"
 
@@ -350,5 +372,7 @@ echo "当前策略: ${STRATEGY}"
 echo "当前场景: ${SCENE_KEY}"
 echo "结果目录: ${SESSION_EXPORT_DIR}"
 echo "输出文件前缀: ${OUTPUT_PREFIX}"
+echo "转向命令记录: ${CMD_VEL_FILE}"
+echo "里程姿态记录: ${ODOM_FILE}"
 
 wait

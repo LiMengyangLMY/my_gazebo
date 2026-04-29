@@ -126,6 +126,27 @@ catkin_ws/
             └── best.onnx
 ```
 
+## 小车模型尺寸
+
+当前小车几何尺寸以 [src/my_simulation/models_and_worlds/simple_car.urdf](/home/lmy/catkin_ws/src/my_simulation/models_and_worlds/simple_car.urdf:1) 为准，俯视尺寸图见：
+
+- [src/my_simulation/models_and_worlds/simple_car_three_view.svg](/home/lmy/catkin_ws/src/my_simulation/models_and_worlds/simple_car_three_view.svg:1)
+
+主要尺寸如下：
+
+- 机身主体尺寸：`0.50 m × 0.50 m × 0.06 m`
+- 轮子尺寸：直径 `0.06 m`，厚度 `0.03 m`
+- 左右轮中心距：`0.54 m`
+- 前后轮中心距：`0.36 m`
+- 相机外壳尺寸：`0.02 m × 0.10 m × 0.02 m`
+- 相机安装点：相对 `base_link` 位于 `(0.25, 0, 0.05) m`
+- 单侧挡板导流臂尺寸：`0.55 m × 0.018 m × 0.03 m`
+- 挡板末端圆柱尺寸：长度 `0.05 m`，半径 `0.04 m`
+- 挡板根部安装点：相对 `base_link` 位于 `(0.40, ±0.24, -0.005) m`
+- 挡板安装偏航角：左右分别为 `±0.60 rad`
+- 挡板末端圆柱中心：沿挡板局部前向再偏移 `0.305 m`
+- 整车外廓尺寸（含挡板、轮子、相机）：长度约 `0.942 m`，宽度约 `0.904 m`，高度约 `0.090 m`
+
 ## 标定参数说明
 
 当前程序从 `src/my_simulation/config/stereo_config.yaml` 读取以下字段：
