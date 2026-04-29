@@ -205,6 +205,18 @@ call_trigger_rosservice() {
   rosservice call "${service_name}" >/dev/null
 }
 
+wait_for_true_bool_topic() {
+  local topic="$1"
+  while true; do
+    local output
+    output="$(rostopic echo -n 1 "${topic}" 2>/dev/null || true)"
+    if grep -Eq 'data: *(true|True|1)$' <<< "${output}"; then
+      return 0
+    fi
+    sleep 1
+  done
+}
+
 start_topic_recorder() {
   local topic="$1"
   local output_file="$2"
@@ -334,6 +346,7 @@ sleep "${SIM_LAUNCH_WAIT_SEC}"
 wait_for_topic "/stereo_camera/left/image_raw" "${WINDOW_WAIT_TIMEOUT_SEC}"
 wait_for_topic "/stereo_camera/right/image_raw" "${WINDOW_WAIT_TIMEOUT_SEC}"
 wait_for_service "/ball_pickup_controller/start" "${WINDOW_WAIT_TIMEOUT_SEC}"
+wait_for_topic "/ball_pickup_controller/pickup_complete" "${WINDOW_WAIT_TIMEOUT_SEC}"
 sleep "${CAMERA_STREAM_SETTLE_SEC}"
 
 echo "打开左目图像窗口..."
@@ -375,4 +388,6 @@ echo "输出文件前缀: ${OUTPUT_PREFIX}"
 echo "转向命令记录: ${CMD_VEL_FILE}"
 echo "里程姿态记录: ${ODOM_FILE}"
 
-wait
+echo "等待最后一个球完成拾取..."
+wait_for_true_bool_topic "/ball_pickup_controller/pickup_complete"
+echo "检测到最后一个球已拾取，正在结束录制并导出结果..."

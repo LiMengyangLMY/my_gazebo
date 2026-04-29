@@ -13,6 +13,7 @@
 #include <gazebo_msgs/DeleteModel.h>
 #include <gazebo_msgs/ModelStates.h>
 #include <ros/ros.h>
+#include <std_msgs/Bool.h>
 #include <std_srvs/Trigger.h>
 
 struct BallInfo {
@@ -45,6 +46,7 @@ public:
         loadParameters();
 
         cmd_pub_ = nh_.advertise<geometry_msgs::Twist>("/cmd_vel", 1);
+        pickup_complete_pub_ = pnh_.advertise<std_msgs::Bool>("pickup_complete", 1, true);
         model_states_sub_ = nh_.subscribe("/gazebo/model_states", 1, &BallPickupController::modelStatesCallback, this);
         start_service_ = pnh_.advertiseService("start", &BallPickupController::handleStartRequest, this);
         control_timer_ = nh_.createTimer(ros::Duration(1.0 / control_frequency_),
@@ -56,6 +58,8 @@ public:
             info.name = ball_name;
             balls_[ball_name] = info;
         }
+
+        publishPickupComplete(false);
 
         ROS_INFO("ball_pickup_controller started. strategy=%s, robot_model=%s, balls=%zu, wait_for_manual_start=%s",
                  strategy_.c_str(), robot_model_name_.c_str(), ball_names_.size(),
@@ -437,6 +441,10 @@ private:
         return std::max(0.0, pickup_half_width_ - segment_pickup_side_shrink_);
     }
 
+    double segmentGuidanceBandHalfWidth() const {
+        return std::max(0.0, segmentPickupBandHalfWidth() - segment_guidance_inset_);
+    }
+
     bool isSegmentInGuardCaptureZone(double rel_forward, double rel_lateral) const {
         if (rel_forward < front_boundary_x_ || rel_forward > guard_capture_tip_forward_x_) {
             return false;
@@ -471,8 +479,7 @@ private:
     }
 
     double strategyControlBandHalfWidth(bool point_strategy) const {
-        (void)point_strategy;
-        return 0.0;
+        return point_strategy ? 0.0 : segmentGuidanceBandHalfWidth();
     }
 
     double computeStrategyLateralOverflow(bool point_strategy, double rel_lateral) const {
@@ -483,11 +490,16 @@ private:
         return computeBandControlHeading(rel_forward, rel_lateral, 0.0);
     }
 
+    double computeSegmentControlHeading(double rel_forward, double rel_lateral) const {
+        return computeBandControlHeading(rel_forward, rel_lateral, segmentGuidanceBandHalfWidth());
+    }
+
     double computeStrategyControlHeading(bool point_strategy,
                                          double rel_forward,
                                          double rel_lateral) const {
-        (void)point_strategy;
-        return computePointControlHeading(rel_forward, rel_lateral);
+        return point_strategy
+            ? computePointControlHeading(rel_forward, rel_lateral)
+            : computeSegmentControlHeading(rel_forward, rel_lateral);
     }
 
     bool isStrategyAdvanceReady(bool point_strategy,
@@ -644,6 +656,10 @@ private:
         it->second.pickup_time_sec = currentRunTimeSec();
         it->second.pickup_order = static_cast<int>(picked_ball_count_ + 1);
         ++picked_ball_count_;
+        if (picked_ball_count_ == ball_names_.size()) {
+            markRunFinishedIfNeeded();
+            publishPickupComplete(true);
+        }
         if (current_target_name_ == ball_name) {
             current_target_name_.clear();
             setControlMode(ControlMode::ROTATE_ONLY);
@@ -665,6 +681,12 @@ private:
         last_linear_cmd_ = 0.0;
         last_angular_cmd_ = 0.0;
         cmd_pub_.publish(cmd);
+    }
+
+    void publishPickupComplete(bool complete) {
+        std_msgs::Bool msg;
+        msg.data = complete;
+        pickup_complete_pub_.publish(msg);
     }
 
     void setControlMode(ControlMode new_mode) {
@@ -743,6 +765,7 @@ private:
         setControlMode(ControlMode::ROTATE_ONLY);
         resetPointRecoveryTracking();
         resetSearchTracking();
+        publishPickupComplete(false);
 
         response.success = true;
         response.message = "ball_pickup_controller start accepted";
@@ -1276,14 +1299,17 @@ private:
         publishControl(rel_forward, rel_lateral, heading, distance);
 
         ROS_INFO_THROTTLE(1.0,
-                          "state=%s target=%s forward=%.3f lateral=%.3f heading=%.3f strategy=%s mode=%s",
+                          "state=%s target=%s forward=%.3f lateral=%.3f heading=%.3f control_heading=%.3f lateral_overflow=%.3f strategy=%s mode=%s",
                           behaviorStateName(), target_name.c_str(), rel_forward, rel_lateral, heading,
+                          computeStrategyControlHeading(isPointStrategy(), rel_forward, rel_lateral),
+                          computeStrategyLateralOverflow(isPointStrategy(), rel_lateral),
                           strategy_.c_str(), controlModeName());
     }
 
     ros::NodeHandle nh_;
     ros::NodeHandle pnh_;
     ros::Publisher cmd_pub_;
+    ros::Publisher pickup_complete_pub_;
     ros::Subscriber model_states_sub_;
     ros::Timer control_timer_;
     ros::ServiceClient delete_model_client_;

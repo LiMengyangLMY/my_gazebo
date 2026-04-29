@@ -68,6 +68,7 @@ my_simulation/CMakeFiles/ball_pickup_controller.dir/src/ball_pickup_controller.c
  /opt/ros/noetic/include/ros/wall_timer.h
  /opt/ros/noetic/include/ros/wall_timer_options.h
  /opt/ros/noetic/include/rosconsole/macros_generated.h
+ /opt/ros/noetic/include/std_msgs/Bool.h
  /opt/ros/noetic/include/std_srvs/Trigger.h
  /opt/ros/noetic/include/std_srvs/TriggerRequest.h
  /opt/ros/noetic/include/std_srvs/TriggerResponse.h
