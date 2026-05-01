@@ -131,6 +131,7 @@ catkin_ws/
 当前小车几何尺寸以 [src/my_simulation/models_and_worlds/simple_car.urdf](/home/lmy/catkin_ws/src/my_simulation/models_and_worlds/simple_car.urdf:1) 为准，俯视尺寸图见：
 
 - [src/my_simulation/models_and_worlds/simple_car_three_view.svg](/home/lmy/catkin_ws/src/my_simulation/models_and_worlds/simple_car_three_view.svg:1)
+- [src/my_simulation/models_and_worlds/pickup_zone_top_view.svg](/home/lmy/catkin_ws/src/my_simulation/models_and_worlds/pickup_zone_top_view.svg:1)
 
 主要尺寸如下：
 

@@ -9,17 +9,23 @@
 #include <utility>
 #include <vector>
 
+#include <geometry_msgs/PoseArray.h>
 #include <geometry_msgs/Twist.h>
 #include <gazebo_msgs/DeleteModel.h>
 #include <gazebo_msgs/ModelStates.h>
 #include <ros/ros.h>
 #include <std_msgs/Bool.h>
 #include <std_srvs/Trigger.h>
+#include <xmlrpcpp/XmlRpcValue.h>
 
 struct BallInfo {
     std::string name;
     double world_x = 0.0;
     double world_y = 0.0;
+    bool world_estimate_initialized = false;
+    double model_world_x = 0.0;
+    double model_world_y = 0.0;
+    bool model_visible = false;
     bool visible = false;
     bool picked = false;
     ros::Time last_seen;
@@ -48,6 +54,7 @@ public:
         cmd_pub_ = nh_.advertise<geometry_msgs::Twist>("/cmd_vel", 1);
         pickup_complete_pub_ = pnh_.advertise<std_msgs::Bool>("pickup_complete", 1, true);
         model_states_sub_ = nh_.subscribe("/gazebo/model_states", 1, &BallPickupController::modelStatesCallback, this);
+        stereo_ball_positions_sub_ = nh_.subscribe("/stereo/ball_positions", 1, &BallPickupController::stereoBallPositionsCallback, this);
         start_service_ = pnh_.advertiseService("start", &BallPickupController::handleStartRequest, this);
         control_timer_ = nh_.createTimer(ros::Duration(1.0 / control_frequency_),
                                          &BallPickupController::controlTimerCallback,
@@ -58,6 +65,7 @@ public:
             info.name = ball_name;
             balls_[ball_name] = info;
         }
+        loadSceneBallAnchors();
 
         publishPickupComplete(false);
 
@@ -102,7 +110,7 @@ private:
         pnh_.param("max_angular_speed", max_angular_speed_, 0.8);
         pnh_.param("heading_gain", heading_gain_, 1.2);
         pnh_.param("distance_gain", distance_gain_, 0.5);
-        pnh_.param("front_boundary_x", front_boundary_x_, 0.25);
+        pnh_.param("front_boundary_x", front_boundary_x_, 0.6917);
         pnh_.param("pickup_half_width", pickup_half_width_, 0.25);
         pnh_.param("ball_radius", ball_radius_, 0.033);
         pnh_.param("pickup_tolerance", pickup_tolerance_, 0.02);
@@ -110,8 +118,6 @@ private:
         pnh_.param("depth_error_margin", depth_error_margin_, 0.0356);
         pnh_.param("segment_pickup_side_shrink", segment_pickup_side_shrink_, 0.0356);
         pnh_.param("segment_guidance_inset", segment_guidance_inset_, 0.0356);
-        pnh_.param("guard_capture_tip_forward_x", guard_capture_tip_forward_x_, 0.652);
-        pnh_.param("guard_capture_tip_half_width", guard_capture_tip_half_width_, 0.337);
         pnh_.param("shared_advance_lateral_overflow_tolerance", shared_advance_lateral_overflow_tolerance_, 0.04);
         pnh_.param("shared_advance_heading_tolerance", shared_advance_heading_tolerance_, 0.14);
         pnh_.param("shared_realign_lateral_overflow_tolerance", shared_realign_lateral_overflow_tolerance_, 0.10);
@@ -154,7 +160,7 @@ private:
         pnh_.param("angular_cmd_slew_rate", angular_cmd_slew_rate_, 1.80);
         pnh_.param("rotate_only_heading_threshold", rotate_only_heading_threshold_, 0.35);
         pnh_.param("forward_control_heading_threshold", forward_control_heading_threshold_, 0.60);
-        pnh_.param("target_loss_timeout", target_loss_timeout_, 0.5);
+        pnh_.param("target_loss_timeout", target_loss_timeout_, 1.0);
         pnh_.param("target_view_heading_half_angle", target_view_heading_half_angle_, 0.75);
         pnh_.param("target_distance_tie_threshold", target_distance_tie_threshold_, 0.10);
         pnh_.param("search_rotate_speed", search_rotate_speed_, 0.35);
@@ -182,12 +188,57 @@ private:
             strategy_ = "segment";
         }
 
+        pnh_.param("visual_target_match_distance", visual_target_match_distance_, 1.50);
+        pnh_.param("visual_positions_timeout", visual_positions_timeout_, 1.00);
+        pnh_.param("visual_position_ema_alpha", visual_position_ema_alpha_, 0.20);
+        pnh_.param("camera_offset_x", camera_offset_x_, 0.25);
+        pnh_.param("camera_offset_y", camera_offset_y_, 0.0);
+
         manual_start_requested_ = !wait_for_manual_start_;
+    }
+
+    void loadSceneBallAnchors() {
+        if (!pnh_.hasParam("balls")) {
+            return;
+        }
+
+        XmlRpc::XmlRpcValue ball_specs;
+        pnh_.getParam("balls", ball_specs);
+        if (ball_specs.getType() != XmlRpc::XmlRpcValue::TypeArray) {
+            return;
+        }
+
+        for (int i = 0; i < ball_specs.size(); ++i) {
+            if (ball_specs[i].getType() != XmlRpc::XmlRpcValue::TypeStruct ||
+                !ball_specs[i].hasMember("name")) {
+                continue;
+            }
+            const std::string ball_name = static_cast<std::string>(ball_specs[i]["name"]);
+            auto it = balls_.find(ball_name);
+            if (it == balls_.end()) {
+                continue;
+            }
+
+            if (ball_specs[i].hasMember("x")) {
+                it->second.initial_x = static_cast<double>(ball_specs[i]["x"]);
+                it->second.world_x = it->second.initial_x;
+            }
+            if (ball_specs[i].hasMember("y")) {
+                it->second.initial_y = static_cast<double>(ball_specs[i]["y"]);
+                it->second.world_y = it->second.initial_y;
+            }
+            it->second.initial_recorded = true;
+        }
     }
 
     void modelStatesCallback(const gazebo_msgs::ModelStates::ConstPtr& msg) {
         latest_states_ = *msg;
         have_model_states_ = true;
+    }
+
+    void stereoBallPositionsCallback(const geometry_msgs::PoseArray::ConstPtr& msg) {
+        latest_stereo_ball_positions_ = *msg;
+        have_stereo_ball_positions_ = true;
     }
 
     double normalizeAngle(double angle) const {
@@ -212,7 +263,7 @@ private:
         }
 
         for (auto& entry : balls_) {
-            entry.second.visible = false;
+            entry.second.model_visible = false;
         }
 
         bool robot_found = false;
@@ -227,19 +278,90 @@ private:
 
             auto it = balls_.find(name);
             if (it != balls_.end()) {
-                it->second.world_x = latest_states_.pose[i].position.x;
-                it->second.world_y = latest_states_.pose[i].position.y;
-                it->second.visible = true;
-                it->second.last_seen = ros::Time::now();
-                if (!it->second.initial_recorded) {
-                    it->second.initial_recorded = true;
-                    it->second.initial_x = it->second.world_x;
-                    it->second.initial_y = it->second.world_y;
-                }
+                it->second.model_world_x = latest_states_.pose[i].position.x;
+                it->second.model_world_y = latest_states_.pose[i].position.y;
+                it->second.model_visible = true;
             }
         }
 
         return robot_found;
+    }
+
+    void updateBallStatesFromVision(double robot_x, double robot_y, double robot_yaw) {
+        for (auto& entry : balls_) {
+            entry.second.visible = false;
+        }
+
+        if (!have_stereo_ball_positions_) {
+            return;
+        }
+
+        const double age_sec = std::abs((ros::Time::now() - latest_stereo_ball_positions_.header.stamp).toSec());
+        if (age_sec > visual_positions_timeout_) {
+            return;
+        }
+
+        std::vector<std::string> matched_ball_names;
+        matched_ball_names.reserve(latest_stereo_ball_positions_.poses.size());
+        std::size_t unmatched_visual_targets = 0;
+
+        for (const geometry_msgs::Pose& pose : latest_stereo_ball_positions_.poses) {
+            const double rel_forward = pose.position.x + camera_offset_x_;
+            const double rel_lateral = pose.position.y + camera_offset_y_;
+            const double est_world_x = robot_x + std::cos(robot_yaw) * rel_forward - std::sin(robot_yaw) * rel_lateral;
+            const double est_world_y = robot_y + std::sin(robot_yaw) * rel_forward + std::cos(robot_yaw) * rel_lateral;
+
+            double best_match_distance = std::numeric_limits<double>::max();
+            BallInfo* best_match = nullptr;
+
+            for (auto& entry : balls_) {
+                BallInfo& ball = entry.second;
+                if (ball.picked) {
+                    continue;
+                }
+                if (std::find(matched_ball_names.begin(), matched_ball_names.end(), ball.name) != matched_ball_names.end()) {
+                    continue;
+                }
+
+                const bool use_live_anchor = ball.world_estimate_initialized &&
+                                             !ball.last_seen.isZero() &&
+                                             (ros::Time::now() - ball.last_seen).toSec() <= target_loss_timeout_;
+                const double anchor_x = use_live_anchor ? ball.world_x : (ball.initial_recorded ? ball.initial_x : ball.world_x);
+                const double anchor_y = use_live_anchor ? ball.world_y : (ball.initial_recorded ? ball.initial_y : ball.world_y);
+                const double match_distance = std::hypot(anchor_x - est_world_x, anchor_y - est_world_y);
+                if (match_distance < best_match_distance) {
+                    best_match_distance = match_distance;
+                    best_match = &ball;
+                }
+            }
+
+            if (best_match == nullptr || best_match_distance > visual_target_match_distance_) {
+                ++unmatched_visual_targets;
+                continue;
+            }
+
+            if (best_match->world_estimate_initialized) {
+                best_match->world_x = visual_position_ema_alpha_ * est_world_x +
+                                      (1.0 - visual_position_ema_alpha_) * best_match->world_x;
+                best_match->world_y = visual_position_ema_alpha_ * est_world_y +
+                                      (1.0 - visual_position_ema_alpha_) * best_match->world_y;
+            } else {
+                best_match->world_x = est_world_x;
+                best_match->world_y = est_world_y;
+                best_match->world_estimate_initialized = true;
+            }
+            best_match->visible = true;
+            best_match->last_seen = ros::Time::now();
+            matched_ball_names.push_back(best_match->name);
+        }
+
+        ROS_INFO_THROTTLE(1.0,
+                          "vision_control poses=%zu matched=%zu unmatched=%zu match_thresh=%.2f ema_alpha=%.2f",
+                          latest_stereo_ball_positions_.poses.size(),
+                          matched_ball_names.size(),
+                          unmatched_visual_targets,
+                          visual_target_match_distance_,
+                          visual_position_ema_alpha_);
     }
 
     bool selectNearestTarget(double robot_x, double robot_y, std::string& target_name) {
@@ -357,21 +479,28 @@ private:
                               double robot_y,
                               double robot_yaw,
                               std::string& target_name) {
+        (void)robot_x;
+        (void)robot_y;
+        (void)robot_yaw;
+
+        if (!current_target_name_.empty()) {
+            auto current_it = balls_.find(current_target_name_);
+            if (current_it != balls_.end() && ballAvailable(current_it->second)) {
+                target_name = current_target_name_;
+                return true;
+            }
+            current_target_name_.clear();
+            setControlMode(ControlMode::ROTATE_ONLY);
+        }
+
         std::string policy_target_name;
         const bool have_visible_policy_target = selectVisibleTargetByPolicy(robot_x, robot_y, robot_yaw, policy_target_name);
 
         if (have_visible_policy_target) {
-            if (current_target_name_ != policy_target_name) {
-                current_target_name_ = policy_target_name;
-                setControlMode(ControlMode::ROTATE_ONLY);
-            }
+            current_target_name_ = policy_target_name;
+            setControlMode(ControlMode::ROTATE_ONLY);
             target_name = current_target_name_;
             return true;
-        }
-
-        if (!current_target_name_.empty()) {
-            current_target_name_.clear();
-            setControlMode(ControlMode::ROTATE_ONLY);
         }
 
         return false;
@@ -447,6 +576,28 @@ private:
         return true;
     }
 
+    bool computeRelativeTargetFromModel(const BallInfo& ball,
+                                        double robot_x,
+                                        double robot_y,
+                                        double robot_yaw,
+                                        double& rel_forward,
+                                        double& rel_lateral,
+                                        double& heading,
+                                        double& distance) const {
+        if (!ball.model_visible) {
+            return false;
+        }
+
+        const double dx = ball.model_world_x - robot_x;
+        const double dy = ball.model_world_y - robot_y;
+
+        rel_forward = std::cos(robot_yaw) * dx + std::sin(robot_yaw) * dy;
+        rel_lateral = -std::sin(robot_yaw) * dx + std::cos(robot_yaw) * dy;
+        heading = std::atan2(rel_lateral, rel_forward);
+        distance = std::hypot(rel_forward, rel_lateral);
+        return true;
+    }
+
     bool isPickupSuccess(bool point_strategy,
                          double rel_forward,
                          double rel_lateral,
@@ -455,9 +606,9 @@ private:
         (void)heading;
         const double effective_depth_tolerance = ball_radius_ + pickup_tolerance_ + depth_error_margin_;
 
-        return (std::abs(rel_lateral) <= segmentPickupBandHalfWidth() &&
-                std::abs(rel_forward - front_boundary_x_) <= effective_depth_tolerance) ||
-               isSegmentInGuardCaptureZone(rel_forward, rel_lateral);
+        return std::abs(rel_lateral) <= segmentPickupBandHalfWidth() &&
+               rel_forward <= front_boundary_x_ &&
+               rel_forward >= (front_boundary_x_ - effective_depth_tolerance);
     }
 
     double segmentPickupBandHalfWidth() const {
@@ -466,21 +617,6 @@ private:
 
     double segmentGuidanceBandHalfWidth() const {
         return std::max(0.0, segmentPickupBandHalfWidth() - segment_guidance_inset_);
-    }
-
-    bool isSegmentInGuardCaptureZone(double rel_forward, double rel_lateral) const {
-        if (rel_forward < front_boundary_x_ || rel_forward > guard_capture_tip_forward_x_) {
-            return false;
-        }
-
-        const double start_half_width = segmentPickupBandHalfWidth();
-        const double end_half_width = std::max(start_half_width, guard_capture_tip_half_width_);
-        const double ratio = clamp((rel_forward - front_boundary_x_) /
-                                   std::max(1e-6, guard_capture_tip_forward_x_ - front_boundary_x_),
-                                   0.0,
-                                   1.0);
-        const double allowed_half_width = start_half_width + ratio * (end_half_width - start_half_width);
-        return std::abs(rel_lateral) <= allowed_half_width;
     }
 
     double computeBandControlHeading(double rel_forward,
@@ -626,9 +762,9 @@ private:
         (void)point_strategy;
         const double effective_depth_tolerance = ball_radius_ + pickup_tolerance_ + depth_error_margin_;
 
-        return (std::abs(rel_lateral) <= segmentPickupBandHalfWidth() &&
-                std::abs(rel_forward - front_boundary_x_) <= effective_depth_tolerance) ||
-               isSegmentInGuardCaptureZone(rel_forward, rel_lateral);
+        return std::abs(rel_lateral) <= segmentPickupBandHalfWidth() &&
+               rel_forward <= front_boundary_x_ &&
+               rel_forward >= (front_boundary_x_ - effective_depth_tolerance);
     }
 
     bool pickupBallsInContactBand(double robot_x, double robot_y, double robot_yaw) {
@@ -642,7 +778,7 @@ private:
             }
 
             const BallInfo& ball = it->second;
-            if (ball.picked || !ball.visible) {
+            if (ball.picked || !ball.model_visible) {
                 continue;
             }
 
@@ -650,7 +786,7 @@ private:
             double rel_lateral = 0.0;
             double heading = 0.0;
             double distance = 0.0;
-            computeRelativeTarget(ball, robot_x, robot_y, robot_yaw, rel_forward, rel_lateral, heading, distance);
+            computeRelativeTargetFromModel(ball, robot_x, robot_y, robot_yaw, rel_forward, rel_lateral, heading, distance);
 
             if (isBallWithinPickupBand(point_strategy, rel_forward, rel_lateral)) {
                 touched_balls.push_back(ball.name);
@@ -1234,6 +1370,7 @@ private:
             stopRobot();
             return;
         }
+        updateBallStatesFromVision(robot_x, robot_y, robot_yaw);
 
         recordPathSample(robot_x, robot_y, robot_yaw);
 
@@ -1249,6 +1386,13 @@ private:
 
         std::string target_name;
         if (!selectTargetWithLock(robot_x, robot_y, robot_yaw, target_name)) {
+            if (have_stereo_ball_positions_) {
+                ROS_INFO_THROTTLE(1.0,
+                                  "state=%s strategy=%s detected visual balls=%zu but no control target selected.",
+                                  behaviorStateName(),
+                                  strategy_.c_str(),
+                                  latest_stereo_ball_positions_.poses.size());
+            }
             current_target_name_.clear();
 
             if (!anyAvailableTargets()) {
@@ -1295,6 +1439,18 @@ private:
         double heading = 0.0;
         double distance = 0.0;
         computeRelativeTarget(target_ball, robot_x, robot_y, robot_yaw, rel_forward, rel_lateral, heading, distance);
+        double model_rel_forward = 0.0;
+        double model_rel_lateral = 0.0;
+        double model_heading = 0.0;
+        double model_distance = 0.0;
+        const bool have_model_target = computeRelativeTargetFromModel(target_ball,
+                                                                      robot_x,
+                                                                      robot_y,
+                                                                      robot_yaw,
+                                                                      model_rel_forward,
+                                                                      model_rel_lateral,
+                                                                      model_heading,
+                                                                      model_distance);
         const double progress_heading = computeStrategyControlHeading(isPointStrategy(), rel_forward, rel_lateral);
 
         if (enable_recovery_) {
@@ -1312,7 +1468,8 @@ private:
             }
         }
 
-        if (isPickupSuccess(isPointStrategy(), rel_forward, rel_lateral, heading)) {
+        if (have_model_target &&
+            isPickupSuccess(isPointStrategy(), model_rel_forward, model_rel_lateral, model_heading)) {
             behavior_state_ = BehaviorState::PICKUP_SUCCESS;
             stopRobot();
             removePickedBall(target_name);
@@ -1334,12 +1491,15 @@ private:
     ros::Publisher cmd_pub_;
     ros::Publisher pickup_complete_pub_;
     ros::Subscriber model_states_sub_;
+    ros::Subscriber stereo_ball_positions_sub_;
     ros::Timer control_timer_;
     ros::ServiceClient delete_model_client_;
     ros::ServiceServer start_service_;
 
     gazebo_msgs::ModelStates latest_states_;
     bool have_model_states_ = false;
+    geometry_msgs::PoseArray latest_stereo_ball_positions_;
+    bool have_stereo_ball_positions_ = false;
 
     std::string robot_model_name_;
     std::string strategy_;
@@ -1351,7 +1511,7 @@ private:
     double max_angular_speed_ = 0.8;
     double heading_gain_ = 1.2;
     double distance_gain_ = 0.5;
-    double front_boundary_x_ = 0.25;
+    double front_boundary_x_ = 0.6917;
     double pickup_half_width_ = 0.25;
     double ball_radius_ = 0.033;
     double pickup_tolerance_ = 0.02;
@@ -1359,8 +1519,6 @@ private:
     double depth_error_margin_ = 0.0356;
     double segment_pickup_side_shrink_ = 0.0356;
     double segment_guidance_inset_ = 0.0356;
-    double guard_capture_tip_forward_x_ = 0.652;
-    double guard_capture_tip_half_width_ = 0.337;
     double shared_advance_lateral_overflow_tolerance_ = 0.04;
     double shared_advance_heading_tolerance_ = 0.14;
     double shared_realign_lateral_overflow_tolerance_ = 0.10;
@@ -1404,6 +1562,11 @@ private:
     double rotate_only_heading_threshold_ = 0.35;
     double forward_control_heading_threshold_ = 0.60;
     double target_loss_timeout_ = 0.5;
+    double visual_target_match_distance_ = 0.60;
+    double visual_positions_timeout_ = 0.50;
+    double visual_position_ema_alpha_ = 0.35;
+    double camera_offset_x_ = 0.25;
+    double camera_offset_y_ = 0.0;
     double target_view_heading_half_angle_ = 0.75;
     double target_distance_tie_threshold_ = 0.10;
     double search_rotate_speed_ = 0.35;

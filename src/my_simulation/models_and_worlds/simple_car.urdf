@@ -172,14 +172,15 @@
     <sensor type="multicamera" name="stereo_camera">
       <update_rate>30.0</update_rate>
       <camera name="left">
-        <horizontal_fov>1.3962634</horizontal_fov>
-        <image><width>320</width><height>240</height><format>R8G8B8</format></image>
+        <pose>0 0.03 0 0 0 0</pose>
+        <horizontal_fov>1.5707963</horizontal_fov>
+        <image><width>640</width><height>480</height><format>R8G8B8</format></image>
         <clip><near>0.02</near><far>300</far></clip>
       </camera>
       <camera name="right">
-        <pose>0 -0.06 0 0 0 0</pose>
-        <horizontal_fov>1.3962634</horizontal_fov>
-        <image><width>320</width><height>240</height><format>R8G8B8</format></image>
+        <pose>0 -0.03 0 0 0 0</pose>
+        <horizontal_fov>1.5707963</horizontal_fov>
+        <image><width>640</width><height>480</height><format>R8G8B8</format></image>
         <clip><near>0.02</near><far>300</far></clip>
       </camera>
       <plugin name="stereo_camera_controller" filename="libgazebo_ros_multicamera.so">

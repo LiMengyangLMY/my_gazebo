@@ -9,8 +9,8 @@ balls:
   # Random-like 5-ball half-court layout for A/B turning comparison.
   # Compared with the 10-ball turncmp scene, this one is sparser and more
   # irregular, but still avoids extreme cross-court jumps.
-  - {name: tennis_ball_1, x: 2.58, y: 0.36, z: 0.033}
-  - {name: tennis_ball_2, x: 2.84, y: -0.54, z: 0.033}
-  - {name: tennis_ball_3, x: 3.96, y: 0.02, z: 0.033}
-  - {name: tennis_ball_4, x: 4.18, y: -0.56, z: 0.033}
-  - {name: tennis_ball_5, x: 6.34, y: 0.32, z: 0.033}
+  - {name: tennis_ball_1, x: 1.88, y: 0.00, z: 0.033}
+  - {name: tennis_ball_2, x: 2.34, y: -0.34, z: 0.033}
+  - {name: tennis_ball_3, x: 3.36, y: 0.02, z: 0.033}
+  - {name: tennis_ball_4, x: 4.10, y: -0.56, z: 0.033}
+  - {name: tennis_ball_5, x: 5.0, y: 0.32, z: 0.033}

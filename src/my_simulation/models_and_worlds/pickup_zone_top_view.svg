@@ -1,0 +1,99 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1280" height="820" viewBox="0 0 1280 820">
+  <defs>
+    <style>
+      .title { font: 700 30px sans-serif; fill: #1f2937; }
+      .label { font: 600 18px sans-serif; fill: #374151; }
+      .note { font: 15px sans-serif; fill: #4b5563; }
+      .axis { stroke: #9ca3af; stroke-width: 1.5; stroke-dasharray: 8 6; }
+      .body { fill: #93c5fd; stroke: #1d4ed8; stroke-width: 2.5; }
+      .guard { fill: #cbd5e1; stroke: #475569; stroke-width: 2; }
+      .wheel { fill: #6b7280; stroke: #111827; stroke-width: 1.5; }
+      .pickupBand { fill: rgba(34,197,94,0.22); stroke: #16a34a; stroke-width: 2.5; }
+      .camera { fill: #06b6d4; stroke: #0f172a; stroke-width: 1.5; }
+      .panel { fill: #ffffff; stroke: #cbd5e1; stroke-width: 1.5; }
+      .dimlineRed { stroke: #dc2626; stroke-width: 1.8; marker-start: url(#arrowRed); marker-end: url(#arrowRed); }
+      .dimlineGreen { stroke: #16a34a; stroke-width: 1.8; marker-start: url(#arrowGreen); marker-end: url(#arrowGreen); }
+      .tickRed { stroke: #dc2626; stroke-width: 1.4; }
+      .tickGreen { stroke: #16a34a; stroke-width: 1.4; }
+      .textRed { font: 18px sans-serif; fill: #dc2626; }
+      .textGreen { font: 18px sans-serif; fill: #16a34a; }
+    </style>
+    <marker id="arrowRed" viewBox="0 0 10 10" refX="5" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+      <path d="M 0 0 L 10 5 L 0 10 z" fill="#dc2626"/>
+    </marker>
+    <marker id="arrowGreen" viewBox="0 0 10 10" refX="5" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+      <path d="M 0 0 L 10 5 L 0 10 z" fill="#16a34a"/>
+    </marker>
+  </defs>
+
+  <rect x="0" y="0" width="1280" height="820" fill="#ffffff"/>
+  <text x="36" y="44" class="title">Pickup Geometry Top View</text>
+  <text x="36" y="72" class="note">Current effective pickup region from code: width = 2 × 0.2144 m, front edge = guard tip edge at x = 0.6917 m.</text>
+
+  <rect x="36" y="96" width="1208" height="690" rx="18" ry="18" class="panel"/>
+
+  <!-- scale: 520 px / m, origin at vehicle center -->
+  <g transform="translate(320,430)">
+    <!-- axes -->
+    <line x1="-170" y1="0" x2="500" y2="0" class="axis"/>
+    <line x1="0" y1="-260" x2="0" y2="260" class="axis"/>
+    <text x="510" y="6" class="note">+x forward</text>
+    <text x="10" y="-245" class="note">+y left</text>
+
+    <!-- pickup band: x in [0.6031, 0.6917], |y| <= 0.2144 -->
+    <rect x="313.61" y="-111.49" width="46.07" height="222.98" class="pickupBand"/>
+
+    <!-- guards -->
+    <g transform="translate(208,-124.8) rotate(-34.377)">
+      <rect x="-143" y="-4.7" width="286" height="9.4" class="guard"/>
+      <circle cx="159" cy="0" r="20.8" class="guard"/>
+    </g>
+    <g transform="translate(208,124.8) rotate(34.377)">
+      <rect x="-143" y="-4.7" width="286" height="9.4" class="guard"/>
+      <circle cx="159" cy="0" r="20.8" class="guard"/>
+    </g>
+
+    <!-- body -->
+    <rect x="-130" y="-130" width="260" height="260" class="body"/>
+
+    <!-- camera -->
+    <rect x="124.8" y="-26" width="10.4" height="52" class="camera"/>
+
+    <!-- wheels -->
+    <rect x="78" y="-148.2" width="31.2" height="15.6" class="wheel"/>
+    <rect x="78" y="132.6" width="31.2" height="15.6" class="wheel"/>
+    <rect x="-109.2" y="-148.2" width="31.2" height="15.6" class="wheel"/>
+    <rect x="-109.2" y="132.6" width="31.2" height="15.6" class="wheel"/>
+
+    <!-- front edge -->
+    <line x1="359.68" y1="-145" x2="359.68" y2="145" stroke="#16a34a" stroke-width="1.8" stroke-dasharray="6 5"/>
+    <text x="371" y="-140" class="note">Front edge (guard tip) x = 0.6917 m</text>
+
+    <!-- pickup rear boundary -->
+    <line x1="313.61" y1="-145" x2="313.61" y2="145" stroke="#16a34a" stroke-width="1.2" stroke-dasharray="4 5"/>
+    <text x="192" y="-140" class="note">Rear pickup boundary x = 0.6031 m</text>
+  </g>
+
+  <!-- body width -->
+  <line x1="640" y1="300" x2="640" y2="560" class="dimlineRed"/>
+  <line x1="621" y1="300" x2="649" y2="300" class="tickRed"/>
+  <line x1="621" y1="560" x2="649" y2="560" class="tickRed"/>
+  <text x="665" y="434" class="textRed" transform="rotate(90 665 434)">Body width = 0.50 m</text>
+
+  <!-- pickup band width -->
+  <line x1="760" y1="318.5" x2="760" y2="541.5" class="dimlineGreen"/>
+  <line x1="741" y1="318.5" x2="769" y2="318.5" class="tickGreen"/>
+  <line x1="741" y1="541.5" x2="769" y2="541.5" class="tickGreen"/>
+  <text x="786" y="432" class="textGreen" transform="rotate(90 786 432)">Pickup band width = 0.4288 m</text>
+
+  <!-- pickup depth -->
+  <line x1="633.61" y1="655" x2="679.68" y2="655" class="dimlineGreen"/>
+  <line x1="633.61" y1="638" x2="633.61" y2="666" class="tickGreen"/>
+  <line x1="679.68" y1="638" x2="679.68" y2="666" class="tickGreen"/>
+  <text x="518" y="690" class="textGreen">Pickup depth = 0.0886 m (from rear boundary to front edge)</text>
+
+  <!-- notes -->
+  <text x="48" y="735" class="label">Current effective pickup rule</text>
+  <text x="48" y="765" class="note">1. Horizontal range: |rel_lateral| ≤ 0.2144 m</text>
+  <text x="48" y="790" class="note">2. Forward range: rel_forward ∈ [0.6031, 0.6917] m</text>
+</svg>
