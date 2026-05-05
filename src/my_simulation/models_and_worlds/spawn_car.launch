@@ -4,6 +4,7 @@
   <arg name="startup_delay_sec" default="0.0"/>
   <arg name="artifacts_output_dir" default=""/>
   <arg name="strategy" default="segment"/>
+  <arg name="planning_source" default="model"/>
   <arg name="scene_file" default="$(find my_simulation)/config/scenes/demo_4.yaml"/>
 
   <!-- 1. 加载 URDF 机器人模型 -->
@@ -41,6 +42,7 @@
     <rosparam command="load" file="$(arg scene_file)"/>
     <param name="robot_model_name" value="simple_car"/>
     <param name="strategy" value="$(arg strategy)"/>
+    <param name="planning_source" value="$(arg planning_source)"/>
     <param name="control_frequency" value="12.0"/>
     <param name="max_linear_speed" value="0.4"/>
     <param name="max_angular_speed" value="0.8"/>

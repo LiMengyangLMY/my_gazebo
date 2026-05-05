@@ -69,8 +69,8 @@ public:
 
         publishPickupComplete(false);
 
-        ROS_INFO("ball_pickup_controller started. strategy=%s, robot_model=%s, balls=%zu, wait_for_manual_start=%s",
-                 strategy_.c_str(), robot_model_name_.c_str(), ball_names_.size(),
+        ROS_INFO("ball_pickup_controller started. strategy=%s, planning_source=%s, robot_model=%s, balls=%zu, wait_for_manual_start=%s",
+                 strategy_.c_str(), planning_source_.c_str(), robot_model_name_.c_str(), ball_names_.size(),
                  wait_for_manual_start_ ? "true" : "false");
     }
 
@@ -89,6 +89,7 @@ private:
         WAITING_START,
         WAITING_DELAY,
         SEARCHING,
+        TRAVERSING,
         TRACKING,
         PICKUP_SUCCESS,
         STOPPED_NO_TARGET
@@ -98,6 +99,10 @@ private:
         return strategy_ == "point";
     }
 
+    bool useModelPlanning() const {
+        return planning_source_ == "model";
+    }
+
     std::string strategyDisplayName() const {
         return isPointStrategy() ? "traditional_point" : "improved_segment";
     }
@@ -105,6 +110,7 @@ private:
     void loadParameters() {
         pnh_.param<std::string>("robot_model_name", robot_model_name_, "simple_car");
         pnh_.param<std::string>("strategy", strategy_, "segment");
+        pnh_.param<std::string>("planning_source", planning_source_, "model");
         pnh_.param("control_frequency", control_frequency_, 20.0);
         pnh_.param("max_linear_speed", max_linear_speed_, 0.4);
         pnh_.param("max_angular_speed", max_angular_speed_, 0.8);
@@ -165,6 +171,17 @@ private:
         pnh_.param("target_distance_tie_threshold", target_distance_tie_threshold_, 0.10);
         pnh_.param("search_rotate_speed", search_rotate_speed_, 0.35);
         pnh_.param("search_brake_duration_sec", search_brake_duration_sec_, 0.25);
+        pnh_.param("enable_spiral_traversal", enable_spiral_traversal_, true);
+        pnh_.param("traversal_x_min", traversal_x_min_, 0.80);
+        pnh_.param("traversal_x_max", traversal_x_max_, 11.00);
+        pnh_.param("traversal_y_min", traversal_y_min_, -5.00);
+        pnh_.param("traversal_y_max", traversal_y_max_, 5.00);
+        pnh_.param("traversal_inset_step", traversal_inset_step_, 1.20);
+        pnh_.param("traversal_waypoint_tolerance", traversal_waypoint_tolerance_, 0.25);
+        pnh_.param("traversal_heading_tolerance", traversal_heading_tolerance_, 0.22);
+        pnh_.param("traversal_linear_speed", traversal_linear_speed_, 0.22);
+        pnh_.param("traversal_angular_gain", traversal_angular_gain_, 1.20);
+        pnh_.param("traversal_max_angular_speed", traversal_max_angular_speed_, 0.45);
         pnh_.param("heading_deadband", heading_deadband_, 0.03);
         pnh_.param("lateral_deadband", lateral_deadband_, 0.02);
         pnh_.param("segment_heading_enter_tolerance", segment_heading_enter_tolerance_, 0.12);
@@ -186,6 +203,11 @@ private:
         if (strategy_ != "point" && strategy_ != "segment") {
             ROS_WARN("Unknown strategy '%s', fallback to 'segment'.", strategy_.c_str());
             strategy_ = "segment";
+        }
+
+        if (planning_source_ != "model" && planning_source_ != "vision") {
+            ROS_WARN("Unknown planning_source '%s', fallback to 'model'.", planning_source_.c_str());
+            planning_source_ = "model";
         }
 
         pnh_.param("visual_target_match_distance", visual_target_match_distance_, 1.50);
@@ -371,12 +393,12 @@ private:
 
         for (const auto& entry : balls_) {
             const BallInfo& ball = entry.second;
-            if (ball.picked || !ball.visible) {
+            if (ball.picked || !(useModelPlanning() ? ball.model_visible : ball.visible)) {
                 continue;
             }
 
-            const double dx = ball.world_x - robot_x;
-            const double dy = ball.world_y - robot_y;
+            const double dx = (useModelPlanning() ? ball.model_world_x : ball.world_x) - robot_x;
+            const double dy = (useModelPlanning() ? ball.model_world_y : ball.world_y) - robot_y;
             const double distance = std::hypot(dx, dy);
             const double rel_lateral = dy;
             if (distance < (best_distance - target_distance_tie_threshold_)) {
@@ -408,6 +430,10 @@ private:
             return false;
         }
 
+        if (useModelPlanning()) {
+            return ball.model_visible;
+        }
+
         if (ball.visible) {
             return true;
         }
@@ -428,13 +454,13 @@ private:
         return rel_forward > 0.0 && heading_abs <= target_view_heading_half_angle_;
     }
 
-    bool selectVisibleTargetByPolicy(double robot_x,
-                                     double robot_y,
-                                     double robot_yaw,
-                                     std::string& target_name) {
-        double best_visible_distance = std::numeric_limits<double>::max();
-        double best_visible_rel_lateral = 0.0;
-        std::string visible_target_name;
+    bool selectTargetByPolicy(double robot_x,
+                              double robot_y,
+                              double robot_yaw,
+                              std::string& target_name) {
+        double best_distance = std::numeric_limits<double>::max();
+        double best_rel_lateral = 0.0;
+        std::string best_target_name;
 
         for (const auto& entry : balls_) {
             const BallInfo& ball = entry.second;
@@ -448,27 +474,27 @@ private:
             double distance = 0.0;
             computeRelativeTarget(ball, robot_x, robot_y, robot_yaw, rel_forward, rel_lateral, heading, distance);
 
-            if (!isBallInView(rel_forward, std::abs(heading))) {
+            if (!useModelPlanning() && !isBallInView(rel_forward, std::abs(heading))) {
                 continue;
             }
 
-            if (distance < (best_visible_distance - target_distance_tie_threshold_)) {
-                best_visible_distance = distance;
-                best_visible_rel_lateral = rel_lateral;
-                visible_target_name = ball.name;
-            } else if (std::abs(distance - best_visible_distance) <= target_distance_tie_threshold_) {
+            if (distance < (best_distance - target_distance_tie_threshold_)) {
+                best_distance = distance;
+                best_rel_lateral = rel_lateral;
+                best_target_name = ball.name;
+            } else if (std::abs(distance - best_distance) <= target_distance_tie_threshold_) {
                 const bool current_is_right = rel_lateral < 0.0;
-                const bool best_is_right = best_visible_rel_lateral < 0.0;
+                const bool best_is_right = best_rel_lateral < 0.0;
                 if (current_is_right && !best_is_right) {
-                    best_visible_distance = distance;
-                    best_visible_rel_lateral = rel_lateral;
-                    visible_target_name = ball.name;
+                    best_distance = distance;
+                    best_rel_lateral = rel_lateral;
+                    best_target_name = ball.name;
                 }
             }
         }
 
-        if (!visible_target_name.empty()) {
-            target_name = visible_target_name;
+        if (!best_target_name.empty()) {
+            target_name = best_target_name;
             return true;
         }
 
@@ -494,9 +520,9 @@ private:
         }
 
         std::string policy_target_name;
-        const bool have_visible_policy_target = selectVisibleTargetByPolicy(robot_x, robot_y, robot_yaw, policy_target_name);
+        const bool have_policy_target = selectTargetByPolicy(robot_x, robot_y, robot_yaw, policy_target_name);
 
-        if (have_visible_policy_target) {
+        if (have_policy_target) {
             current_target_name_ = policy_target_name;
             setControlMode(ControlMode::ROTATE_ONLY);
             target_name = current_target_name_;
@@ -512,6 +538,12 @@ private:
         search_last_yaw_rad_ = 0.0;
         search_has_last_yaw_sample_ = false;
         search_brake_end_time_ = ros::Time();
+    }
+
+    void resetTraversalTracking() {
+        traversal_active_ = false;
+        traversal_waypoints_.clear();
+        traversal_waypoint_index_ = 0;
     }
 
     void beginSearch(double robot_yaw) {
@@ -558,6 +590,91 @@ private:
         cmd_pub_.publish(cmd);
     }
 
+    void buildSpiralTraversalWaypoints() {
+        traversal_waypoints_.clear();
+
+        double left = traversal_x_min_;
+        double right = traversal_x_max_;
+        double bottom = traversal_y_min_;
+        double top = traversal_y_max_;
+        const double step = std::max(0.20, traversal_inset_step_);
+
+        while (left <= right && bottom <= top) {
+            traversal_waypoints_.emplace_back(left, top);
+            traversal_waypoints_.emplace_back(right, top);
+            traversal_waypoints_.emplace_back(right, bottom);
+            traversal_waypoints_.emplace_back(left, bottom);
+            left += step;
+            right -= step;
+            bottom += step;
+            top -= step;
+        }
+    }
+
+    void beginSpiralTraversal() {
+        buildSpiralTraversalWaypoints();
+        traversal_waypoint_index_ = 0;
+        traversal_active_ = !traversal_waypoints_.empty();
+        current_target_name_.clear();
+        setControlMode(ControlMode::ROTATE_ONLY);
+        if (traversal_active_) {
+            ROS_INFO("Search rotation completed without finding a ball. Entering half-court spiral traversal mode with %zu waypoints.",
+                     traversal_waypoints_.size());
+        }
+    }
+
+    bool updateTraversalWaypoint(double robot_x, double robot_y) {
+        if (!traversal_active_) {
+            return false;
+        }
+
+        while (traversal_waypoint_index_ < traversal_waypoints_.size()) {
+            const auto& waypoint = traversal_waypoints_[traversal_waypoint_index_];
+            const double distance = std::hypot(waypoint.first - robot_x, waypoint.second - robot_y);
+            if (distance > traversal_waypoint_tolerance_) {
+                return true;
+            }
+            ++traversal_waypoint_index_;
+        }
+
+        traversal_active_ = false;
+        return false;
+    }
+
+    void publishTraversalControl(double robot_x, double robot_y, double robot_yaw) {
+        if (!traversal_active_ || traversal_waypoint_index_ >= traversal_waypoints_.size()) {
+            stopRobot();
+            return;
+        }
+
+        const auto& waypoint = traversal_waypoints_[traversal_waypoint_index_];
+        const double dx = waypoint.first - robot_x;
+        const double dy = waypoint.second - robot_y;
+        const double rel_forward = std::cos(robot_yaw) * dx + std::sin(robot_yaw) * dy;
+        const double rel_lateral = -std::sin(robot_yaw) * dx + std::cos(robot_yaw) * dy;
+        const double heading = std::atan2(rel_lateral, rel_forward);
+        const double heading_abs = std::abs(heading);
+
+        geometry_msgs::Twist cmd;
+        if (rel_forward < 0.0 || heading_abs > traversal_heading_tolerance_) {
+            cmd.linear.x = 0.0;
+            const double requested_angular = traversal_angular_gain_ * heading;
+            const double angular_sign = (requested_angular >= 0.0) ? 1.0 : -1.0;
+            const double angular_mag = std::max(shared_rotate_min_angular_speed_, std::abs(requested_angular));
+            cmd.angular.z = angular_sign * clamp(angular_mag, 0.0, traversal_max_angular_speed_);
+            last_linear_cmd_ = 0.0;
+            last_angular_cmd_ = cmd.angular.z;
+            cmd_pub_.publish(cmd);
+            return;
+        }
+
+        cmd.linear.x = traversal_linear_speed_;
+        cmd.angular.z = clamp(traversal_angular_gain_ * heading,
+                              -traversal_max_angular_speed_,
+                              traversal_max_angular_speed_);
+        cmd_pub_.publish(smoothCommand(cmd));
+    }
+
     bool computeRelativeTarget(const BallInfo& ball,
                                double robot_x,
                                double robot_y,
@@ -566,6 +683,17 @@ private:
                                double& rel_lateral,
                                double& heading,
                                double& distance) const {
+        if (useModelPlanning()) {
+            return computeRelativeTargetFromModel(ball,
+                                                  robot_x,
+                                                  robot_y,
+                                                  robot_yaw,
+                                                  rel_forward,
+                                                  rel_lateral,
+                                                  heading,
+                                                  distance);
+        }
+
         const double dx = ball.world_x - robot_x;
         const double dy = ball.world_y - robot_y;
 
@@ -825,6 +953,7 @@ private:
         }
         resetPointRecoveryTracking();
         resetSearchTracking();
+        resetTraversalTracking();
 
         gazebo_msgs::DeleteModel delete_srv;
         delete_srv.request.model_name = ball_name;
@@ -924,6 +1053,7 @@ private:
         setControlMode(ControlMode::ROTATE_ONLY);
         resetPointRecoveryTracking();
         resetSearchTracking();
+        resetTraversalTracking();
         publishPickupComplete(false);
 
         response.success = true;
@@ -1221,6 +1351,8 @@ private:
                 return "WAITING_DELAY";
             case BehaviorState::SEARCHING:
                 return "SEARCHING";
+            case BehaviorState::TRAVERSING:
+                return "TRAVERSING";
             case BehaviorState::TRACKING:
                 return "TRACKING";
             case BehaviorState::PICKUP_SUCCESS:
@@ -1386,13 +1518,6 @@ private:
 
         std::string target_name;
         if (!selectTargetWithLock(robot_x, robot_y, robot_yaw, target_name)) {
-            if (have_stereo_ball_positions_) {
-                ROS_INFO_THROTTLE(1.0,
-                                  "state=%s strategy=%s detected visual balls=%zu but no control target selected.",
-                                  behaviorStateName(),
-                                  strategy_.c_str(),
-                                  latest_stereo_ball_positions_.poses.size());
-            }
             current_target_name_.clear();
 
             if (!anyAvailableTargets()) {
@@ -1400,9 +1525,29 @@ private:
                 stopRobot();
                 setControlMode(ControlMode::ROTATE_ONLY);
                 resetSearchTracking();
+                resetTraversalTracking();
                 markRunFinishedIfNeeded();
-                ROS_INFO_THROTTLE(2.0, "state=%s strategy=%s all balls picked or no visible targets left.",
-                                  behaviorStateName(), strategy_.c_str());
+                ROS_INFO_THROTTLE(2.0, "state=%s strategy=%s planning_source=%s all balls picked or no selectable targets left.",
+                                  behaviorStateName(), strategy_.c_str(), planning_source_.c_str());
+                return;
+            }
+
+            if (traversal_active_) {
+                behavior_state_ = BehaviorState::TRAVERSING;
+                if (!updateTraversalWaypoint(robot_x, robot_y)) {
+                    behavior_state_ = BehaviorState::STOPPED_NO_TARGET;
+                    stopRobot();
+                    resetTraversalTracking();
+                    markRunFinishedIfNeeded();
+                    ROS_INFO_THROTTLE(2.0, "state=%s strategy=%s completed spiral traversal without finding a ball. Robot stopped.",
+                                      behaviorStateName(), strategy_.c_str());
+                    return;
+                }
+
+                publishTraversalControl(robot_x, robot_y, robot_yaw);
+                ROS_INFO_THROTTLE(1.0, "state=%s strategy=%s waypoint=%zu/%zu spiral traversal active.",
+                                  behaviorStateName(), strategy_.c_str(),
+                                  traversal_waypoint_index_ + 1, traversal_waypoints_.size());
                 return;
             }
 
@@ -1415,9 +1560,20 @@ private:
                 return;
             }
             if (updateSearchProgress(robot_yaw)) {
+                resetSearchTracking();
+                if (enable_spiral_traversal_) {
+                    beginSpiralTraversal();
+                    if (traversal_active_) {
+                        behavior_state_ = BehaviorState::TRAVERSING;
+                        publishTraversalControl(robot_x, robot_y, robot_yaw);
+                        ROS_INFO_THROTTLE(1.0, "state=%s strategy=%s switching from search to spiral traversal.",
+                                          behaviorStateName(), strategy_.c_str());
+                        return;
+                    }
+                }
+
                 behavior_state_ = BehaviorState::STOPPED_NO_TARGET;
                 stopRobot();
-                resetSearchTracking();
                 markRunFinishedIfNeeded();
                 ROS_INFO_THROTTLE(2.0, "state=%s strategy=%s completed one full search rotation without finding a ball. Robot stopped.",
                                   behaviorStateName(), strategy_.c_str());
@@ -1430,6 +1586,7 @@ private:
             return;
         }
         resetSearchTracking();
+        resetTraversalTracking();
         behavior_state_ = BehaviorState::TRACKING;
 
         const BallInfo& target_ball = balls_.at(target_name);
@@ -1503,6 +1660,7 @@ private:
 
     std::string robot_model_name_;
     std::string strategy_;
+    std::string planning_source_;
     std::vector<std::string> ball_names_;
     std::map<std::string, BallInfo> balls_;
 
@@ -1571,6 +1729,17 @@ private:
     double target_distance_tie_threshold_ = 0.10;
     double search_rotate_speed_ = 0.35;
     double search_brake_duration_sec_ = 0.25;
+    bool enable_spiral_traversal_ = true;
+    double traversal_x_min_ = 0.80;
+    double traversal_x_max_ = 11.00;
+    double traversal_y_min_ = -5.00;
+    double traversal_y_max_ = 5.00;
+    double traversal_inset_step_ = 1.20;
+    double traversal_waypoint_tolerance_ = 0.25;
+    double traversal_heading_tolerance_ = 0.22;
+    double traversal_linear_speed_ = 0.22;
+    double traversal_angular_gain_ = 1.20;
+    double traversal_max_angular_speed_ = 0.45;
     double heading_deadband_ = 0.03;
     double lateral_deadband_ = 0.02;
     double segment_heading_enter_tolerance_ = 0.12;
@@ -1614,6 +1783,9 @@ private:
     double search_last_yaw_rad_ = 0.0;
     double search_accumulated_yaw_rad_ = 0.0;
     ros::Time search_brake_end_time_;
+    bool traversal_active_ = false;
+    std::vector<std::pair<double, double>> traversal_waypoints_;
+    std::size_t traversal_waypoint_index_ = 0;
     ros::Time control_mode_last_switch_time_;
     ros::Time startup_reference_time_;
     bool startup_time_initialized_ = false;

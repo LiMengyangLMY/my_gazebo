@@ -74,6 +74,10 @@
 
 这意味着后续控制目标不再是单纯最小化球到车体中线的横向误差，而是最小化球到车前沿有效拾取线段的距离。只要球能够进入前沿捕获带，就可以完成拾取。
 
+![路径规划拾取范围对比图](src/my_simulation/models_and_worlds/pickup_strategy_compare.svg)
+
+上图左侧为传统方案，拾取范围抽象为车前的一条线；右侧为改进方案，拾取范围扩展为车前的一段条带。更新视场角后，条带宽度不再按视野与挡板外缘的交汇宽度取值，而是按两侧挡板前端圆形结构的内切开口宽度确定，因此对横向和前向误差仍具有更高容忍度。
+
 按当前项目设定，这条算法思想将结合以下规则实现：
 
 - 前沿定义为 `base_link` 的前边界
@@ -135,12 +139,12 @@ catkin_ws/
 
 主要尺寸如下：
 
-- 机身主体尺寸：`0.50 m × 0.50 m × 0.06 m`
+- 机身主体尺寸：`0.50 m × 0.50 m × 0.07 m`
 - 轮子尺寸：直径 `0.06 m`，厚度 `0.03 m`
 - 左右轮中心距：`0.54 m`
 - 前后轮中心距：`0.36 m`
 - 相机外壳尺寸：`0.02 m × 0.10 m × 0.02 m`
-- 相机安装点：相对 `base_link` 位于 `(0.25, 0, 0.05) m`
+- 相机安装点：相对 `base_link` 位于 `(0.25, 0, 0.055) m`
 - 单侧挡板导流臂尺寸：`0.55 m × 0.018 m × 0.03 m`
 - 挡板末端圆柱尺寸：长度 `0.05 m`，半径 `0.04 m`
 - 挡板根部安装点：相对 `base_link` 位于 `(0.40, ±0.24, -0.005) m`
@@ -340,6 +344,18 @@ cd /home/lmy/catkin_ws
 source /opt/ros/noetic/setup.bash
 source /home/lmy/catkin_ws/devel/setup.bash
 roslaunch my_simulation spawn_car.launch
+```
+
+如需切换路径规划时所使用的网球坐标来源，可追加 `planning_source` 参数：
+
+- `planning_source:=model`：使用 Gazebo 建模真值坐标进行路径规划
+- `planning_source:=vision`：使用视觉节点输出坐标进行路径规划
+
+例如：
+
+```bash
+roslaunch my_simulation spawn_car.launch planning_source:=model
+roslaunch my_simulation spawn_car.launch planning_source:=vision
 ```
 
 如果你要直接分别运行两种策略和两类主实验场景，推荐使用以下 launch：

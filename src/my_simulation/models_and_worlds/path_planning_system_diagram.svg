@@ -1,0 +1,120 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1600" height="980" viewBox="0 0 1600 980">
+  <defs>
+    <style>
+      .title { font: 700 34px "Noto Sans CJK SC", "Microsoft YaHei", sans-serif; fill: #1f2937; }
+      .group { fill: none; stroke: #9ca3af; stroke-width: 2.2; stroke-dasharray: 10 8; }
+      .group-label { font: 700 30px "Noto Sans CJK SC", "Microsoft YaHei", sans-serif; fill: #374151; }
+      .box-blue { fill: #eff6ff; stroke: #2563eb; stroke-width: 2.4; rx: 18; ry: 18; }
+      .box-green { fill: #f0fdf4; stroke: #16a34a; stroke-width: 2.4; rx: 18; ry: 18; }
+      .box-orange { fill: #fff7ed; stroke: #ea580c; stroke-width: 2.4; rx: 18; ry: 18; }
+      .box-purple { fill: #faf5ff; stroke: #9333ea; stroke-width: 2.4; rx: 18; ry: 18; }
+      .box-gray { fill: #f8fafc; stroke: #475569; stroke-width: 2.4; rx: 18; ry: 18; }
+      .text { font: 700 24px "Noto Sans CJK SC", "Microsoft YaHei", sans-serif; fill: #111827; }
+      .small { font: 18px "Noto Sans CJK SC", "Microsoft YaHei", sans-serif; fill: #374151; }
+      .note { font: 17px "Noto Sans CJK SC", "Microsoft YaHei", sans-serif; fill: #4b5563; }
+      .arrow { stroke: #374151; stroke-width: 2.4; fill: none; marker-end: url(#arrowHead); }
+      .arrow-blue { stroke: #2563eb; stroke-width: 2.4; fill: none; marker-end: url(#arrowHeadBlue); }
+      .arrow-green { stroke: #16a34a; stroke-width: 2.4; fill: none; marker-end: url(#arrowHeadGreen); }
+      .arrow-orange { stroke: #ea580c; stroke-width: 2.4; fill: none; marker-end: url(#arrowHeadOrange); }
+      .arrow-purple { stroke: #9333ea; stroke-width: 2.4; fill: none; marker-end: url(#arrowHeadPurple); }
+    </style>
+    <marker id="arrowHead" markerWidth="10" markerHeight="10" refX="8" refY="5" orient="auto">
+      <path d="M0,0 L10,5 L0,10 z" fill="#374151"/>
+    </marker>
+    <marker id="arrowHeadBlue" markerWidth="10" markerHeight="10" refX="8" refY="5" orient="auto">
+      <path d="M0,0 L10,5 L0,10 z" fill="#2563eb"/>
+    </marker>
+    <marker id="arrowHeadGreen" markerWidth="10" markerHeight="10" refX="8" refY="5" orient="auto">
+      <path d="M0,0 L10,5 L0,10 z" fill="#16a34a"/>
+    </marker>
+    <marker id="arrowHeadOrange" markerWidth="10" markerHeight="10" refX="8" refY="5" orient="auto">
+      <path d="M0,0 L10,5 L0,10 z" fill="#ea580c"/>
+    </marker>
+    <marker id="arrowHeadPurple" markerWidth="10" markerHeight="10" refX="8" refY="5" orient="auto">
+      <path d="M0,0 L10,5 L0,10 z" fill="#9333ea"/>
+    </marker>
+  </defs>
+
+  <rect x="0" y="0" width="1600" height="980" fill="#ffffff"/>
+
+  <!-- Group labels -->
+  <rect x="420" y="96" width="540" height="300" class="group"/>
+  <text x="432" y="84" class="group-label">视觉感知层</text>
+
+  <rect x="430" y="650" width="520" height="240" class="group"/>
+  <text x="442" y="638" class="group-label">执行与仿真层</text>
+
+  <!-- Visual layer -->
+  <rect x="510" y="126" width="360" height="92" class="box-blue"/>
+  <text x="615" y="180" class="text">双目图像采集模块</text>
+
+  <rect x="510" y="270" width="360" height="104" class="box-blue"/>
+  <text x="585" y="318" class="text">识别与定位模块</text>
+  <text x="560" y="348" class="small">YOLO 检测 / 左右匹配 / 深度融合</text>
+
+  <line x1="690" y1="218" x2="690" y2="270" class="arrow-blue"/>
+
+  <!-- Planning and control -->
+  <rect x="500" y="456" width="380" height="150" class="box-green"/>
+  <text x="582" y="505" class="text">目标选择与路径规划</text>
+  <text x="548" y="538" class="small">视野内最近球 / 相近球优先右侧</text>
+  <text x="562" y="566" class="small">point 与 segment 调整角度分流</text>
+
+  <line x1="690" y1="374" x2="690" y2="456" class="arrow-green"/>
+
+  <!-- Gazebo truth -->
+  <rect x="70" y="466" width="280" height="96" class="box-gray"/>
+  <text x="146" y="516" class="text">Gazebo 仿真环境</text>
+  <text x="110" y="546" class="small">机器人位姿真值 / 场地 / 网球模型</text>
+
+  <line x1="350" y1="514" x2="500" y2="514" class="arrow"/>
+
+  <!-- Execution layer -->
+  <rect x="500" y="692" width="380" height="86" class="box-orange"/>
+  <text x="618" y="742" class="text">运动控制模块</text>
+  <text x="552" y="770" class="small">ROTATE_ONLY / ADVANCE / /cmd_vel</text>
+
+  <rect x="500" y="804" width="380" height="64" class="box-orange"/>
+  <text x="548" y="844" class="text">底盘、导流挡板与拾球机构</text>
+
+  <line x1="690" y1="606" x2="690" y2="692" class="arrow-orange"/>
+  <line x1="690" y1="778" x2="690" y2="804" class="arrow-orange"/>
+
+  <!-- Runtime outputs -->
+  <rect x="1080" y="150" width="420" height="104" class="box-purple"/>
+  <text x="1192" y="200" class="text">调试显示与识别结果</text>
+  <text x="1130" y="230" class="small">左右带框图 / 拼接调试图 / 匹配连线</text>
+
+  <rect x="1080" y="410" width="420" height="110" class="box-purple"/>
+  <text x="1200" y="462" class="text">实验记录与结果导出</text>
+  <text x="1128" y="494" class="small">screen.mp4 / path.csv / path.svg / metrics.md</text>
+
+  <rect x="1080" y="660" width="420" height="116" class="box-purple"/>
+  <text x="1162" y="712" class="text">录屏与转向数据采集脚本</text>
+  <text x="1134" y="744" class="small">run_sim_with_views_and_screen_record.sh</text>
+
+  <!-- Scene generation -->
+  <rect x="70" y="720" width="300" height="104" class="box-gray"/>
+  <text x="142" y="772" class="text">场景生成模块</text>
+  <text x="98" y="804" class="small">ball_scene_spawner.py + YAML 场景文件</text>
+
+  <!-- Orthogonal arrows -->
+  <polyline points="870,322 980,322 980,202 1080,202" class="arrow-purple"/>
+  <polyline points="880,530 980,530 980,462 1080,462" class="arrow-purple"/>
+  <polyline points="880,735 980,735 980,718 1080,718" class="arrow-purple"/>
+  <polyline points="500,772 430,772 430,772 370,772" class="arrow"/>
+  <polyline points="500,848 350,848 350,562" class="arrow"/>
+
+  <!-- Small edge labels kept outside boxes -->
+  <text x="708" y="248" class="note">左右图像</text>
+  <text x="706" y="424" class="note">目标相对方位与位置</text>
+  <text x="708" y="652" class="note">速度与姿态控制指令</text>
+  <text x="990" y="190" class="note">stereo/debug_image</text>
+  <text x="990" y="448" class="note">路径、视频与统计结果</text>
+  <text x="992" y="704" class="note">/cmd_vel /odom / pickup_complete</text>
+  <text x="382" y="748" class="note">网球场景初始化</text>
+  <text x="228" y="700" class="note">底盘运动反馈</text>
+  <text x="364" y="494" class="note">机器人位姿与场景状态</text>
+
+  <text x="430" y="934" class="note">说明：当前系统中，球目标主要由双目视觉定位结果驱动，机器人自身位姿仍由 Gazebo 真值提供，以保证控制稳定性与实验可复现性。</text>
+</svg>
